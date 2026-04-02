@@ -1,0 +1,136 @@
+{% extends "pos/base.html" %}
+{% block title %}Shift Management — SmartPOS{% endblock %}
+{% block page_title %}Cash Drawer & Shift{% endblock %}
+
+{% block content %}
+
+{% if open_shift %}
+<!-- OPEN SHIFT -->
+<div style="margin-bottom:20px;">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+    <span style="background:rgba(56,226,184,.15);color:var(--accent2);border:1px solid rgba(56,226,184,.3);border-radius:99px;padding:4px 14px;font-size:12px;font-weight:600;">● SHIFT OPEN</span>
+    <span style="color:var(--muted);font-size:13px;">Started {{ open_shift.opened_at|date:"d M Y, H:i" }}</span>
+  </div>
+</div>
+
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card accent">
+    <div class="stat-label">Opening Cash</div>
+    <div class="stat-value">Rs {{ open_shift.opening_cash|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Sales This Shift</div>
+    <div class="stat-value">Rs {{ shift_stats.total|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Transactions</div>
+    <div class="stat-value">{{ shift_stats.count }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Expected Cash in Drawer</div>
+    <div class="stat-value">Rs {{ open_shift.opening_cash|add:shift_stats.cash|floatformat:2 }}</div>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-bottom:20px;">
+  <div class="card card-sm">
+    <div class="card-title">Payment Breakdown</div>
+    <div class="total-row" style="display:flex;justify-content:space-between;margin-bottom:8px;">
+      <span>💵 Cash</span><span style="font-family:'DM Mono',monospace;">Rs {{ shift_stats.cash|floatformat:2 }}</span>
+    </div>
+    <div class="total-row" style="display:flex;justify-content:space-between;margin-bottom:8px;">
+      <span>💳 Card</span><span style="font-family:'DM Mono',monospace;">Rs {{ shift_stats.card|floatformat:2 }}</span>
+    </div>
+    <div class="total-row" style="display:flex;justify-content:space-between;">
+      <span>📱 Online</span><span style="font-family:'DM Mono',monospace;">Rs {{ shift_stats.online|floatformat:2 }}</span>
+    </div>
+  </div>
+
+  <div class="card card-sm">
+    <div class="card-title">Close Shift</div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="close_shift">
+      <div class="form-group">
+        <label>Actual Cash in Drawer (Rs)</label>
+        <input type="number" name="closing_cash" placeholder="Count and enter cash..." step="0.01" required>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea name="notes" rows="2" placeholder="Any discrepancies or notes..."></textarea>
+      </div>
+      <button type="submit" class="btn btn-danger" style="width:100%;justify-content:center;" onclick="return confirm('Close this shift?')">
+        Close Shift & Reconcile
+      </button>
+    </form>
+  </div>
+</div>
+
+{% else %}
+<!-- NO OPEN SHIFT -->
+<div class="card" style="max-width:440px;margin-bottom:24px;">
+  <div class="card-title">Open New Shift</div>
+  <p style="font-size:13.5px;color:var(--muted);margin-bottom:16px;">Count the cash in the drawer before starting your shift and enter the amount below.</p>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="open_shift">
+    <div class="form-group">
+      <label>Opening Cash Amount (Rs)</label>
+      <input type="number" name="opening_cash" placeholder="0.00" step="0.01" value="0" required>
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">Open Shift</button>
+  </form>
+</div>
+{% endif %}
+
+<!-- Recent Shifts -->
+<div class="card">
+  <div class="card-title">Recent Shifts</div>
+  {% if recent_shifts %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Opened</th>
+          <th>Closed</th>
+          <th>Transactions</th>
+          <th>Total Sales</th>
+          <th>Opening Cash</th>
+          <th>Actual Cash</th>
+          <th>Difference</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in recent_shifts %}
+        <tr>
+          <td>{{ s.opened_at|date:"d M Y" }}</td>
+          <td style="color:var(--muted);">{{ s.opened_at|date:"H:i" }}</td>
+          <td style="color:var(--muted);">{{ s.closed_at|date:"H:i"|default:"—" }}</td>
+          <td>{{ s.total_transactions }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ s.total_sales|floatformat:2 }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ s.opening_cash|floatformat:2 }}</td>
+          <td style="font-family:'DM Mono',monospace;">{{ s.closing_cash|floatformat:2|default:"—" }}</td>
+          <td style="font-family:'DM Mono',monospace;">
+            {% if s.cash_difference is not None %}
+            <span style="color:{% if s.cash_difference >= 0 %}var(--accent2){% else %}var(--danger){% endif %};">
+              {% if s.cash_difference >= 0 %}+{% endif %}Rs {{ s.cash_difference|floatformat:2 }}
+            </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            <span class="badge {% if s.status == 'open' %}badge-green{% else %}badge-gray{% endif %}">
+              {{ s.status|title }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;color:var(--muted);padding:32px;">No shifts recorded yet</div>
+  {% endif %}
+</div>
+{% endblock %}

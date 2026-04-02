@@ -1,0 +1,125 @@
+{% extends "pos/base.html" %}
+{% block title %}Profit Report — SmartPOS{% endblock %}
+{% block page_title %}Profit Report{% endblock %}
+
+{% block topbar_actions %}
+<form method="get" style="display:flex;gap:8px;">
+  <select name="period" onchange="this.form.submit()" style="width:150px;">
+    <option value="7" {% if period == '7' %}selected{% endif %}>Last 7 days</option>
+    <option value="30" {% if period == '30' %}selected{% endif %}>Last 30 days</option>
+    <option value="90" {% if period == '90' %}selected{% endif %}>Last 90 days</option>
+  </select>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card accent">
+    <div class="stat-label">Total Revenue</div>
+    <div class="stat-value">Rs {{ total_revenue|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card danger">
+    <div class="stat-label">Total Cost</div>
+    <div class="stat-value">Rs {{ total_cost|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Net Profit</div>
+    <div class="stat-value">Rs {{ total_profit|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card {% if profit_margin >= 20 %}green{% elif profit_margin >= 10 %}warn{% else %}danger{% endif %}">
+    <div class="stat-label">Profit Margin</div>
+    <div class="stat-value">{{ profit_margin|floatformat:1 }}%</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-title">Daily Revenue vs Profit</div>
+  <canvas id="profitChart" height="80"></canvas>
+</div>
+
+<div class="card">
+  <div class="card-title">Most Profitable Products</div>
+  {% if top_profitable %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Units Sold</th>
+          <th>Revenue</th>
+          <th>Profit</th>
+          <th>Margin</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in top_profitable %}
+        <tr>
+          <td style="font-weight:500;">{{ p.name }}</td>
+          <td>{{ p.units }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ p.revenue }}</td>
+          <td style="font-family:'DM Mono',monospace;color:{% if p.profit > 0 %}var(--accent2){% else %}var(--danger){% endif %};">
+            Rs {{ p.profit }}
+          </td>
+          <td>
+            {% if p.revenue > 0 %}
+            {% widthratio p.profit p.revenue 100 %}%
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;color:var(--muted);padding:32px;">No sales data for this period</div>
+  {% endif %}
+
+  <div style="margin-top:16px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);">
+    ⚠ Profit is calculated using Cost Price entered per product. Make sure cost prices are set correctly in Products for accurate results.
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const daily = {{ daily_data|safe }};
+  const ctx = document.getElementById('profitChart');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: daily.map(d => d.date),
+      datasets: [
+        {
+          label: 'Revenue',
+          data: daily.map(d => d.revenue),
+          backgroundColor: 'rgba(79,156,255,.3)',
+          borderColor: '#4f9cff',
+          borderWidth: 1.5,
+          borderRadius: 3,
+        },
+        {
+          label: 'Profit',
+          data: daily.map(d => d.profit),
+          backgroundColor: 'rgba(56,226,184,.3)',
+          borderColor: '#38e2b8',
+          borderWidth: 1.5,
+          borderRadius: 3,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#7a84a0', font: { size: 11 }, boxWidth: 12 } }
+      },
+      scales: {
+        x: { grid: { color: '#262d3d' }, ticks: { color: '#7a84a0', font: { size: 11 }, maxRotation: 45 } },
+        y: { grid: { color: '#262d3d' }, ticks: { color: '#7a84a0', font: { size: 11 }, callback: v => 'Rs ' + v } }
+      }
+    }
+  });
+});
+</script>
+{% endblock %}

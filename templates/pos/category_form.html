@@ -1,0 +1,29 @@
+{% extends "pos/base.html" %}
+
+{% block title %}Category{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block content %}
+
+<div class="card" style="max-width:500px;margin:auto;">
+
+  <div class="card-title">{{ title }}</div>
+
+  <form method="POST">
+    {% csrf_token %}
+
+    <div class="form-group">
+      <label>Category Name</label>
+      <input type="text" name="name" value="{{ category.name|default:'' }}" required>
+    </div>
+
+    <div style="display:flex;gap:10px;">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <a href="{% url 'categories' %}" class="btn btn-ghost">Cancel</a>
+    </div>
+
+  </form>
+
+</div>
+
+{% endblock %}

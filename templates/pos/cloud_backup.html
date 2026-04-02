@@ -1,0 +1,453 @@
+{% extends "pos/base.html" %}
+{% block title %}Cloud Backup — SmartPOS{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── Hero banner ─────────────────────────────────────────────────────────── */
+.cb-hero{
+  background:linear-gradient(135deg,#1a1a2e 0%,#16213e 60%,#0f3460 100%);
+  border-radius:14px;padding:32px 28px;margin-bottom:24px;
+  color:#fff;display:flex;align-items:center;gap:20px;
+}
+.cb-hero-icon{font-size:52px;flex-shrink:0;}
+.cb-hero h1{font-size:22px;font-weight:700;margin:0 0 6px;}
+.cb-hero p{margin:0;color:rgba(255,255,255,.7);font-size:14px;line-height:1.55;}
+
+/* ── Status pills ────────────────────────────────────────────────────────── */
+.cb-pill{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;margin-top:10px;
+}
+.cb-pill.on {background:rgba(72,199,142,.18);color:#48c78e;border:1px solid rgba(72,199,142,.35);}
+.cb-pill.mid{background:rgba(255,180,50,.18); color:#ffb432;border:1px solid rgba(255,180,50,.35);}
+.cb-pill.off{background:rgba(255,100,100,.18);color:#ff6464;border:1px solid rgba(255,100,100,.35);}
+
+/* ── Step list ───────────────────────────────────────────────────────────── */
+.step-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:50%;
+  background:var(--accent);color:#fff;font-size:12px;font-weight:700;flex-shrink:0;
+}
+.step-row{display:flex;align-items:flex-start;gap:14px;margin-bottom:20px;}
+.step-body h4{margin:0 0 4px;font-size:14px;font-weight:600;color:var(--fg);}
+.step-body p {margin:0;font-size:13px;color:var(--muted);line-height:1.5;}
+.step-body a {color:var(--accent);}
+.step-body code{
+  display:block;background:var(--bg-alt);
+  padding:8px 12px;border-radius:6px;
+  font-size:12px;margin-top:6px;border:1px solid var(--border);
+  word-break:break-all;
+}
+
+/* ── Credentials textarea ────────────────────────────────────────────────── */
+.cred-box{
+  font-family:monospace;font-size:12px;resize:vertical;min-height:190px;
+  border:1px solid var(--border);border-radius:8px;padding:12px;
+  background:var(--bg-alt);color:var(--fg);width:100%;
+  transition:border-color .2s,box-shadow .2s;
+}
+.cred-box:focus{
+  outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(var(--accent-rgb),.15);
+}
+
+/* ── Toggle switch ───────────────────────────────────────────────────────── */
+.toggle-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 0;border-bottom:1px solid var(--border);
+}
+.toggle-row:last-child{border-bottom:none;}
+.toggle-label{font-size:14px;font-weight:500;color:var(--fg);}
+.toggle-desc {font-size:12px;color:var(--muted);margin-top:2px;}
+.toggle-switch{position:relative;display:inline-block;width:46px;height:25px;flex-shrink:0;}
+.toggle-switch input{opacity:0;width:0;height:0;}
+.slider{
+  position:absolute;cursor:pointer;inset:0;
+  background:var(--border);border-radius:25px;transition:.3s;
+}
+.slider:before{
+  position:absolute;content:"";
+  height:19px;width:19px;left:3px;bottom:3px;
+  background:#fff;border-radius:50%;transition:.3s;
+}
+input:checked+.slider{background:var(--accent);}
+input:checked+.slider:before{transform:translateX(21px);}
+
+/* ── Test-result banner ──────────────────────────────────────────────────── */
+.test-result{
+  margin-top:10px;padding:10px 14px;border-radius:8px;
+  font-size:13px;display:none;
+}
+.test-result.ok  {background:rgba(72,199,142,.1);border:1px solid rgba(72,199,142,.3);color:#48c78e;}
+.test-result.fail{background:rgba(255,100,100,.1);border:1px solid rgba(255,100,100,.3);color:#ff6464;}
+
+/* ── Last-backup card ────────────────────────────────────────────────────── */
+.backup-meta{font-size:13px;color:var(--muted);line-height:1.7;}
+.backup-meta strong{color:var(--fg);}
+.backup-meta a{color:var(--accent);word-break:break-all;}
+
+/* ── Guide link ──────────────────────────────────────────────────────────── */
+.guide-link{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(var(--accent-rgb),.08);
+  border:1px solid rgba(var(--accent-rgb),.22);
+  color:var(--accent);padding:8px 16px;border-radius:8px;
+  font-size:13px;font-weight:500;text-decoration:none;transition:background .2s;
+}
+.guide-link:hover{background:rgba(var(--accent-rgb),.18);}
+
+/* ── Package install box ─────────────────────────────────────────────────── */
+.install-box{
+  position:relative;background:var(--bg-alt);
+  border:1px solid var(--border);border-radius:8px;
+  padding:10px 42px 10px 14px;font-family:monospace;
+  font-size:12px;color:var(--fg);word-break:break-all;
+}
+.copy-btn{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  background:none;border:none;cursor:pointer;color:var(--muted);
+  font-size:16px;transition:color .2s;
+}
+.copy-btn:hover{color:var(--accent);}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Hero ──────────────────────────────────────────────────────────────── -->
+<div class="cb-hero">
+  <div class="cb-hero-icon">☁️</div>
+  <div>
+    <h1>Google Drive Cloud Backup</h1>
+    <p>
+      Automatically upload a full Excel snapshot of your sales, products,
+      expenses, and customers to Google Drive every time a transaction is
+      recorded — your data stays safe even if this machine fails.
+    </p>
+
+    {% if s.gdrive_enabled and s.gdrive_credentials_json %}
+      <span class="cb-pill on">● Cloud Backup Active</span>
+    {% elif s.gdrive_credentials_json %}
+      <span class="cb-pill mid">● Credentials saved — enable backup below</span>
+    {% else %}
+      <span class="cb-pill off">● Not connected</span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Flash messages ────────────────────────────────────────────────────── -->
+{% if messages %}
+  {% for msg in messages %}
+    <div class="msg msg-{{ msg.tags }} mb-3">{{ msg }}</div>
+  {% endfor %}
+{% endif %}
+
+<div class="grid-2" style="gap:24px;align-items:start;">
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       LEFT COLUMN — Setup guide + last-backup status
+  ════════════════════════════════════════════════════════════════════ -->
+  <div>
+
+    <div class="card mb-4">
+      <h3 style="margin:0 0 20px;font-size:16px;font-weight:700;">
+        🛠 One-time Setup Guide
+      </h3>
+
+      <div class="step-row">
+        <span class="step-badge">1</span>
+        <div class="step-body">
+          <h4>Create a Google Cloud Project</h4>
+          <p>
+            Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a>,
+            create a new project (or pick an existing one), then search for and enable the
+            <strong>Google Drive API</strong>.
+          </p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <span class="step-badge">2</span>
+        <div class="step-body">
+          <h4>Create a Service Account</h4>
+          <p>
+            <em>IAM &amp; Admin → Service Accounts → Create Service Account.</em><br>
+            Give it any name (e.g. <code>smartpos-backup</code>). No special IAM roles required.
+          </p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <span class="step-badge">3</span>
+        <div class="step-body">
+          <h4>Download the JSON Key</h4>
+          <p>
+            Open the service account → <em>Keys</em> tab → <strong>Add Key → Create new key → JSON</strong>.<br>
+            A <code>.json</code> file downloads. Open it in any text editor, select all, and paste the
+            entire contents into the credentials box on the right.
+          </p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <span class="step-badge">4</span>
+        <div class="step-body">
+          <h4>Share a Drive Folder with the service account</h4>
+          <p>
+            Create a folder in <a href="https://drive.google.com" target="_blank">drive.google.com</a>.
+            Right-click → <em>Share</em> → paste the <code>client_email</code> from the JSON (e.g.
+            <code>smartpos-backup@your-project.iam.gserviceaccount.com</code>) and grant
+            <strong>Editor</strong> access.<br>
+            Then copy the folder ID from the URL
+            (<code>…/folders/<strong>THIS_PART</strong></code>) and paste it below.
+          </p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <span class="step-badge">5</span>
+        <div class="step-body">
+          <h4>Install required Python packages (once, on your server)</h4>
+          <div class="install-box" id="pipCmd">
+            pip install google-auth google-api-python-client google-auth-httplib2 openpyxl
+            <button class="copy-btn" onclick="copyPip()" title="Copy">📋</button>
+          </div>
+        </div>
+      </div>
+
+      <a class="guide-link" href="https://cloud.google.com/iam/docs/keys-create-delete" target="_blank">
+        ↗ Official Google service-account key guide
+      </a>
+    </div>
+
+    <!-- Last backup status ──────────────────────────────────────────────── -->
+    <div class="card">
+      <h3 style="margin:0 0 14px;font-size:15px;font-weight:700;">📊 Backup Status</h3>
+
+      {% if s.gdrive_last_backup_at %}
+        <div class="backup-meta">
+          <div><strong>Last backup:</strong> {{ s.gdrive_last_backup_at|date:"d M Y, H:i" }}</div>
+          {% if s.gdrive_last_backup_url %}
+            <div><strong>File:</strong> <a href="{{ s.gdrive_last_backup_url }}" target="_blank">Open in Google Drive ↗</a></div>
+          {% endif %}
+          <div style="margin-top:8px;">
+            {% if s.gdrive_backup_on_sale %}
+              <span class="cb-pill on" style="font-size:11px;">📦 Auto-backup on sale: ON</span>
+            {% else %}
+              <span class="cb-pill off" style="font-size:11px;">📦 Auto-backup on sale: OFF</span>
+            {% endif %}
+            &nbsp;
+            {% if s.gdrive_backup_on_expense %}
+              <span class="cb-pill on" style="font-size:11px;">💸 Auto-backup on expense: ON</span>
+            {% else %}
+              <span class="cb-pill off" style="font-size:11px;">💸 Auto-backup on expense: OFF</span>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p style="font-size:13px;color:var(--muted);margin:0;">
+          No cloud backup has been uploaded yet.<br>
+          Complete the setup on the right and click <strong>Save Settings</strong>,
+          then trigger a manual backup to verify everything works.
+        </p>
+      {% endif %}
+    </div>
+
+  </div><!-- /left column -->
+
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       RIGHT COLUMN — Settings form + manual backup
+  ════════════════════════════════════════════════════════════════════ -->
+  <div>
+
+    <div class="card mb-4">
+      <h3 style="margin:0 0 20px;font-size:16px;font-weight:700;">🔑 Credentials &amp; Settings</h3>
+
+      <form method="post" id="settingsForm">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save">
+
+        <!-- Credentials JSON ─────────────────────────────────────────────── -->
+        <div class="form-group">
+          <label class="form-label">Service Account JSON Key <span style="color:#e74c3c;">*</span></label>
+          <textarea name="gdrive_credentials_json" class="cred-box"
+            placeholder='{
+  "type": "service_account",
+  "project_id": "your-project",
+  "private_key_id": "abc123...",
+  "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...",
+  "client_email": "smartpos@your-project.iam.gserviceaccount.com",
+  "client_id": "...",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  ...
+}'>{{ s.gdrive_credentials_json }}</textarea>
+          <small style="color:var(--muted);font-size:12px;display:block;margin-top:4px;">
+            🔒 Stored securely in the database. Never sent outside your server.
+          </small>
+        </div>
+
+        <!-- Folder ID ───────────────────────────────────────────────────── -->
+        <div class="form-group">
+          <label class="form-label">
+            Google Drive Folder ID
+            <span style="color:var(--muted);font-weight:400;">(optional but recommended)</span>
+          </label>
+          <input type="text" name="gdrive_folder_id" class="form-control"
+            placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+            value="{{ s.gdrive_folder_id }}">
+          <small style="color:var(--muted);font-size:12px;display:block;margin-top:4px;">
+            From the folder's URL in Drive: …/folders/<strong>FOLDER_ID</strong>.
+            Leave blank to upload to Drive root.
+          </small>
+        </div>
+
+        <!-- Auto-trigger toggles ─────────────────────────────────────────── -->
+        <div class="card" style="background:var(--bg-alt);padding:16px;margin-bottom:20px;">
+          <h4 style="margin:0 0 4px;font-size:14px;font-weight:600;">⚡ Auto-Backup Triggers</h4>
+          <p style="margin:0 0 14px;font-size:12px;color:var(--muted);">
+            Uploads a full Excel backup in a background thread — zero impact on POS speed.
+          </p>
+
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Enable Cloud Backup</div>
+              <div class="toggle-desc">Master switch — must be ON for any auto-backup to occur</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" name="gdrive_enabled"
+                {% if s.gdrive_enabled %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">📦 Backup on every Sale</div>
+              <div class="toggle-desc">Fires automatically when a sale is completed at the POS</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" name="gdrive_backup_on_sale"
+                {% if s.gdrive_backup_on_sale %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">💸 Backup on every Expense</div>
+              <div class="toggle-desc">Fires automatically when an expense entry is saved</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" name="gdrive_backup_on_expense"
+                {% if s.gdrive_backup_on_expense %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Test connection ─────────────────────────────────────────────── -->
+        <div style="margin-bottom:20px;">
+          <button type="button" class="btn btn-secondary" id="testBtn" style="width:100%;">
+            🔌 Test Connection to Google Drive
+          </button>
+          <div class="test-result" id="testResult"></div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">
+          💾 Save Settings
+        </button>
+      </form>
+    </div>
+
+    <!-- Manual backup ────────────────────────────────────────────────────── -->
+    <div class="card">
+      <h3 style="margin:0 0 6px;font-size:15px;font-weight:700;">☁️ Manual Backup</h3>
+      <p style="margin:0 0 16px;font-size:13px;color:var(--muted);">
+        Upload a complete Excel snapshot of all sales, products, expenses, and customers right now.
+        The upload runs in the background — you'll see the result on next page load.
+      </p>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="manual_backup">
+        <button type="submit" class="btn btn-success" style="width:100%;"
+          {% if not s.gdrive_credentials_json %}
+            disabled title="Save credentials first"
+          {% endif %}>
+          ⬆️ Upload Full Backup to Google Drive Now
+        </button>
+      </form>
+
+      {% if not s.gdrive_credentials_json %}
+        <p style="font-size:12px;color:var(--muted);margin:10px 0 0;text-align:center;">
+          ↑ Save your credentials first to enable this button.
+        </p>
+      {% endif %}
+    </div>
+
+  </div><!-- /right column -->
+
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+/* ── Test Connection ────────────────────────────────────────────────────── */
+document.getElementById('testBtn').addEventListener('click', function () {
+  const creds     = document.querySelector('[name=gdrive_credentials_json]').value.trim();
+  const resultBox = document.getElementById('testResult');
+  const btn       = this;
+
+  if (!creds) {
+    resultBox.className      = 'test-result fail';
+    resultBox.style.display  = 'block';
+    resultBox.textContent    = '✗ Please paste your Service Account JSON key first.';
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ Testing connection…';
+
+  fetch('', {
+    method : 'POST',
+    headers: {
+      'Content-Type' : 'application/x-www-form-urlencoded',
+      'X-CSRFToken'  : '{{ csrf_token }}',
+    },
+    body: 'action=test&gdrive_credentials_json=' + encodeURIComponent(creds),
+  })
+  .then(r => r.json())
+  .then(data => {
+    resultBox.style.display = 'block';
+    if (data.ok) {
+      resultBox.className   = 'test-result ok';
+      resultBox.textContent = '✓ Connected! Service account: ' + data.email;
+    } else {
+      resultBox.className   = 'test-result fail';
+      resultBox.textContent = '✗ Failed: ' + data.error;
+    }
+  })
+  .catch(() => {
+    resultBox.className      = 'test-result fail';
+    resultBox.style.display  = 'block';
+    resultBox.textContent    = '✗ Network error — please try again.';
+  })
+  .finally(() => {
+    btn.disabled    = false;
+    btn.textContent = '🔌 Test Connection to Google Drive';
+  });
+});
+
+/* ── Copy pip command ────────────────────────────────────────────────────── */
+function copyPip() {
+  const cmd = 'pip install google-auth google-api-python-client google-auth-httplib2 openpyxl';
+  navigator.clipboard.writeText(cmd).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = '✅';
+    setTimeout(() => btn.textContent = '📋', 1800);
+  });
+}
+</script>
+{% endblock %}

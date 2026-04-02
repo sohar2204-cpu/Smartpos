@@ -1,0 +1,143 @@
+{% extends "pos/base.html" %}
+{% block title %}PIN Management — SmartPOS{% endblock %}
+{% block page_title %}PIN Management{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'reset_cashier' %}" class="btn btn-ghost btn-sm">🔑 Password Reset</a>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;}
+.pin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
+.pin-btn{padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;text-align:center;}
+.pin-btn:hover{background:var(--border);color:var(--accent);}
+.pin-btn:active{transform:scale(.95);}
+.pin-display{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center;font-family:'DM Mono',monospace;font-size:24px;letter-spacing:10px;margin-bottom:14px;color:var(--accent);}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom:16px;border-color:rgba(79,156,255,.2);">
+  <div style="font-size:13px;color:var(--muted);">
+    💡 Set a 4-digit PIN for each cashier so they can log in quickly at the POS terminal without typing their full password. Each PIN must be unique across all users.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">User PINs</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Full Name</th>
+          <th>Role</th>
+          <th>PIN Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td style="font-weight:500;">{{ u.username }}</td>
+          <td style="color:var(--muted);">{{ u.get_full_name|default:"—" }}</td>
+          <td>
+            <span class="badge {% if u.profile.role == 'admin' %}badge-blue{% elif u.profile.role == 'manager' %}badge-green{% else %}badge-gray{% endif %}">
+              {{ u.profile.get_role_display }}
+            </span>
+          </td>
+          <td>
+            {% if u.profile.pin %}
+            <span style="color:var(--accent2);font-weight:600;">✓ PIN Set</span>
+            <span style="font-family:'DM Mono',monospace;color:var(--muted);font-size:11px;margin-left:6px;">({{ u.profile.pin|length }} digits)</span>
+            {% else %}
+            <span style="color:var(--muted);">No PIN</span>
+            {% endif %}
+          </td>
+          <td style="display:flex;gap:6px;">
+            <button class="btn btn-primary btn-xs" onclick="openPinModal({{ u.id }}, '{{ u.username }}')">
+              {% if u.profile.pin %}Change PIN{% else %}Set PIN{% endif %}
+            </button>
+            {% if u.profile.pin %}
+            <form method="post" style="display:inline;" onsubmit="return confirm('Clear PIN for {{ u.username }}?')">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="clear_pin">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--danger);">Clear</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- PIN Modal -->
+<div class="modal-overlay" id="pinModal" onclick="if(event.target===this)closePinModal()">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;max-width:300px;width:90%;">
+    <div style="font-size:16px;font-weight:600;margin-bottom:4px;">Set PIN</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">for <strong id="pinUsername"></strong></div>
+
+    <div class="pin-display" id="pinDisplay">____</div>
+
+    <form method="post" id="pinForm">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="set_pin">
+      <input type="hidden" name="user_id" id="pinUserId">
+      <input type="hidden" name="pin" id="pinValue">
+
+      <div class="pin-grid">
+        {% for n in "123456789" %}
+        <button type="button" class="pin-btn" onclick="addDigit('{{ n }}')">{{ n }}</button>
+        {% endfor %}
+        <button type="button" class="pin-btn" style="font-size:12px;color:var(--muted);" onclick="clearPin()">CLR</button>
+        <button type="button" class="pin-btn" onclick="addDigit('0')">0</button>
+        <button type="button" class="pin-btn" style="color:var(--danger);" onclick="delDigit()">⌫</button>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;" id="savePinBtn" disabled>Save PIN</button>
+    </form>
+
+    <button class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:8px;" onclick="closePinModal()">Cancel</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let pin = '';
+
+function openPinModal(userId, username) {
+  pin = '';
+  document.getElementById('pinUserId').value = userId;
+  document.getElementById('pinUsername').textContent = username;
+  document.getElementById('pinModal').style.display = 'flex';
+  updateDisplay();
+}
+
+function closePinModal() {
+  document.getElementById('pinModal').style.display = 'none';
+  pin = '';
+  updateDisplay();
+}
+
+function updateDisplay() {
+  const filled = '●'.repeat(pin.length);
+  const empty = '_'.repeat(4 - pin.length);
+  document.getElementById('pinDisplay').textContent = filled + empty;
+  document.getElementById('pinValue').value = pin;
+  document.getElementById('savePinBtn').disabled = pin.length !== 4;
+}
+
+function addDigit(d) {
+  if (pin.length < 4) { pin += d; updateDisplay(); }
+}
+function delDigit() { pin = pin.slice(0, -1); updateDisplay(); }
+function clearPin() { pin = ''; updateDisplay(); }
+</script>
+{% endblock %}

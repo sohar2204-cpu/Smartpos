@@ -1,0 +1,163 @@
+{% extends "pos/base.html" %}
+{% block title %}Daily Summary — SmartPOS{% endblock %}
+{% block page_title %}Daily Summary Report{% endblock %}
+
+{% block topbar_actions %}
+<form method="get" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+  <input type="date" name="date" value="{{ report_date_str }}" style="width:160px;">
+  <button type="submit" class="btn btn-primary btn-sm">View</button>
+  <a href="{% url 'daily_summary_pdf' %}?date={{ report_date_str }}" class="btn btn-ghost btn-sm" target="_blank">⬇ Download PDF</a>
+</form>
+{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom:20px;">
+  <div style="font-size:20px;font-weight:600;">{{ report_date|date:"l, d F Y" }}</div>
+  <div style="font-size:13px;color:var(--muted);margin-top:4px;">{{ transaction_count }} transaction{{ transaction_count|pluralize }} recorded</div>
+</div>
+
+<!-- Summary Stats -->
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card accent">
+    <div class="stat-label">Total Revenue</div>
+    <div class="stat-value">Rs {{ total_revenue|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Net Profit</div>
+    <div class="stat-value">Rs {{ net_profit|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="stat-label">Discounts Given</div>
+    <div class="stat-value">Rs {{ total_discount|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Tax Collected</div>
+    <div class="stat-value">Rs {{ total_tax|floatformat:2 }}</div>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-bottom:20px;">
+
+  <!-- Payment Breakdown -->
+  <div class="card">
+    <div class="card-title">Payment Breakdown</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th style="text-align:right;">Amount</th>
+          <th style="text-align:right;">Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>💵 Cash</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;">Rs {{ total_cash|floatformat:2 }}</td>
+          <td style="text-align:right;color:var(--muted);">
+            {% if total_revenue %}{% widthratio total_cash total_revenue 100 %}%{% else %}—{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>💳 Card</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;">Rs {{ total_card|floatformat:2 }}</td>
+          <td style="text-align:right;color:var(--muted);">
+            {% if total_revenue %}{% widthratio total_card total_revenue 100 %}%{% else %}—{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>📱 Online</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;">Rs {{ total_online|floatformat:2 }}</td>
+          <td style="text-align:right;color:var(--muted);">
+            {% if total_revenue %}{% widthratio total_online total_revenue 100 %}%{% else %}—{% endif %}
+          </td>
+        </tr>
+        <tr style="font-weight:600;border-top:2px solid var(--border);">
+          <td>Total</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;color:var(--accent);">Rs {{ total_revenue|floatformat:2 }}</td>
+          <td style="text-align:right;">100%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Top Products -->
+  <div class="card">
+    <div class="card-title">Top Selling Products</div>
+    {% if top_products %}
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product</th>
+          <th style="text-align:right;">Units</th>
+          <th style="text-align:right;">Revenue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in top_products %}
+        <tr>
+          <td style="color:var(--muted);font-size:12px;">{{ forloop.counter }}</td>
+          <td>{{ p.product_name }}</td>
+          <td style="text-align:right;color:var(--muted);">{{ p.units }}</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;">Rs {{ p.revenue|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="color:var(--muted);font-size:13px;padding:20px 0;text-align:center;">No sales on this date</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Transaction List -->
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div class="card-title" style="margin-bottom:0;">All Transactions</div>
+    <a href="{% url 'daily_summary_pdf' %}?date={{ report_date_str }}" class="btn btn-primary btn-sm" target="_blank">⬇ Download PDF Report</a>
+  </div>
+
+  {% if sales %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Sale #</th>
+          <th>Time</th>
+          <th>Cashier</th>
+          <th>Customer</th>
+          <th>Payment</th>
+          <th>Discount</th>
+          <th style="text-align:right;">Total</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sale in sales %}
+        <tr>
+          <td style="font-family:'DM Mono',monospace;font-size:12px;">{{ sale.sale_number }}</td>
+          <td style="color:var(--muted);">{{ sale.created_at|date:"H:i" }}</td>
+          <td>{{ sale.cashier.username|default:"—" }}</td>
+          <td>{{ sale.customer.name|default:"Walk-in" }}</td>
+          <td>
+            <span class="badge {% if sale.payment_method == 'cash' %}badge-green{% elif sale.payment_method == 'card' %}badge-blue{% else %}badge-warn{% endif %}">
+              {{ sale.get_payment_method_display }}
+            </span>
+          </td>
+          <td style="color:var(--danger);">
+            {% if sale.discount_amount > 0 %}- Rs {{ sale.discount_amount|floatformat:2 }}{% else %}—{% endif %}
+          </td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:600;color:var(--accent);">Rs {{ sale.total_amount|floatformat:2 }}</td>
+          <td><a href="{% url 'receipt' sale.id %}" class="btn btn-ghost btn-xs" target="_blank">Receipt</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;color:var(--muted);padding:40px;">No transactions on {{ report_date|date:"d M Y" }}</div>
+  {% endif %}
+</div>
+{% endblock %}

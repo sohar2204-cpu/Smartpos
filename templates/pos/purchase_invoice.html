@@ -1,0 +1,143 @@
+{% extends "pos/base.html" %}
+{% block title %}Purchase Invoice — PO-{{ purchase.id|stringformat:"06d" }}{% endblock %}
+{% block page_title %}Purchase Invoice{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'purchase_invoice_pdf' purchase.id %}" class="btn btn-primary btn-sm">⬇ Download PDF</a>
+<button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Print</button>
+<a href="{% url 'supplier_payments' purchase.supplier.id %}" class="btn btn-ghost btn-sm">← Back</a>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+@media print {
+  .sidebar, .topbar, .no-print { display: none !important; }
+  .main { margin: 0 !important; padding: 0 !important; }
+  .card { border: none !important; box-shadow: none !important; }
+  body { background: white; color: #000; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:780px;margin:0 auto;">
+
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;flex-wrap:wrap;gap:16px;">
+    <div>
+      {% if settings and settings.logo %}
+      <img src="{{ settings.logo.url }}" style="max-height:50px;margin-bottom:8px;display:block;">
+      {% endif %}
+      <div style="font-size:22px;font-weight:700;">{% if store %}{{ store.name }}{% else %}SmartPOS{% endif %}</div>
+      {% if store %}
+      <div style="font-size:13px;color:var(--muted);">{{ store.address }}</div>
+      <div style="font-size:13px;color:var(--muted);">{{ store.phone }}</div>
+      {% endif %}
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:24px;font-weight:700;color:var(--accent);">PURCHASE ORDER</div>
+      <div style="font-size:15px;font-weight:600;font-family:'DM Mono',monospace;margin-top:4px;"># PO-{{ purchase.id|stringformat:"06d" }}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px;">{{ purchase.created_at|date:"d M Y, H:i" }}</div>
+      <div style="margin-top:8px;">
+        {% if purchase.balance_due == 0 %}
+        <span style="background:rgba(56,226,184,.15);color:var(--accent2);border:1px solid rgba(56,226,184,.3);border-radius:99px;padding:4px 14px;font-size:12px;font-weight:600;">✓ FULLY PAID</span>
+        {% elif purchase.amount_paid > 0 %}
+        <span style="background:rgba(245,166,35,.1);color:#f5a623;border:1px solid rgba(245,166,35,.3);border-radius:99px;padding:4px 14px;font-size:12px;font-weight:600;">⏳ PARTIALLY PAID</span>
+        {% else %}
+        <span style="background:rgba(255,95,109,.1);color:var(--danger);border:1px solid rgba(255,95,109,.3);border-radius:99px;padding:4px 14px;font-size:12px;font-weight:600;">⚠ UNPAID</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div style="height:1px;background:var(--border);margin-bottom:24px;"></div>
+
+  <!-- Supplier & PO Info -->
+  <div class="grid-2" style="margin-bottom:24px;">
+    <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border);">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Supplier</div>
+      <div style="font-size:15px;font-weight:600;">{{ purchase.supplier.name }}</div>
+      {% if purchase.supplier.phone %}<div style="font-size:13px;color:var(--muted);margin-top:3px;">📞 {{ purchase.supplier.phone }}</div>{% endif %}
+      {% if purchase.supplier.email %}<div style="font-size:13px;color:var(--muted);">✉ {{ purchase.supplier.email }}</div>{% endif %}
+      {% if purchase.supplier.address %}<div style="font-size:13px;color:var(--muted);">📍 {{ purchase.supplier.address }}</div>{% endif %}
+    </div>
+    <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border);">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Order Details</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;">
+        <span style="color:var(--muted);">PO Number</span>
+        <span style="font-family:'DM Mono',monospace;font-weight:600;">PO-{{ purchase.id|stringformat:"06d" }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;">
+        <span style="color:var(--muted);">Date</span>
+        <span>{{ purchase.created_at|date:"d M Y" }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;">
+        <span style="color:var(--muted);">Added By</span>
+        <span>{{ purchase.added_by.get_full_name|default:purchase.added_by.username|default:"—" }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Items Table -->
+  <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Items Purchased</div>
+  <div class="table-wrap" style="margin-bottom:20px;">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product Name</th>
+          <th>Barcode</th>
+          <th style="text-align:center;">Qty</th>
+          <th style="text-align:right;">Unit Cost</th>
+          <th style="text-align:right;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in purchase.items.all %}
+        <tr>
+          <td style="color:var(--muted);">{{ forloop.counter }}</td>
+          <td style="font-weight:500;">{{ item.product_name }}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:12px;">{{ item.product.barcode|default:"—" }}</td>
+          <td style="text-align:center;">{{ item.quantity }}</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;">Rs {{ item.unit_cost|floatformat:2 }}</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:600;">Rs {{ item.total_cost|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">No items recorded for this purchase</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Totals -->
+  <div style="display:flex;justify-content:flex-end;">
+    <div style="min-width:280px;">
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px;">
+        <span style="color:var(--muted);">Total Amount</span>
+        <span style="font-family:'DM Mono',monospace;font-weight:600;">Rs {{ purchase.total_amount|floatformat:2 }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px;">
+        <span style="color:var(--muted);">Amount Paid</span>
+        <span style="font-family:'DM Mono',monospace;color:var(--accent2);font-weight:600;">Rs {{ purchase.amount_paid|floatformat:2 }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:12px 0;font-size:16px;font-weight:700;">
+        <span>Balance Due</span>
+        <span style="font-family:'DM Mono',monospace;color:{% if purchase.balance_due > 0 %}var(--danger){% else %}var(--accent2){% endif %};">
+          Rs {{ purchase.balance_due|floatformat:2 }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  {% if purchase.notes %}
+  <div style="margin-top:20px;padding:14px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px;">NOTES</div>
+    <div style="font-size:13.5px;">{{ purchase.notes }}</div>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:28px;padding-top:16px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--muted);">
+    Generated by SmartPOS &nbsp;|&nbsp; {{ purchase.created_at|date:"d M Y" }}
+  </div>
+</div>
+{% endblock %}

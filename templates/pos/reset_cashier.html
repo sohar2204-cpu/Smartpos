@@ -1,0 +1,134 @@
+{% extends "pos/base.html" %}
+{% block title %}Reset Cashier Access — SmartPOS{% endblock %}
+{% block page_title %}Reset Cashier Access{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'manage_pins' %}" class="btn btn-ghost btn-sm">🔢 PIN Management</a>
+<a href="{% url 'users' %}" class="btn btn-ghost btn-sm">← All Users</a>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;max-width:400px;width:90%;}
+.modal-title{font-size:16px;font-weight:600;margin-bottom:20px;}
+.modal-footer{display:flex;gap:10px;margin-top:20px;justify-content:flex-end;}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom:16px;border-color:rgba(79,156,255,.2);">
+  <div style="font-size:13px;color:var(--muted);">
+    🔑 Use this page to reset passwords or clear PINs for cashiers who are locked out, or to enable/disable user accounts.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">User Accounts</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Full Name</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>PIN</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td style="font-weight:500;">{{ u.username }}</td>
+          <td style="color:var(--muted);">{{ u.get_full_name|default:"—" }}</td>
+          <td>
+            <span class="badge {% if u.profile.role == 'admin' %}badge-blue{% elif u.profile.role == 'manager' %}badge-green{% else %}badge-gray{% endif %}">
+              {{ u.profile.get_role_display }}
+            </span>
+          </td>
+          <td>
+            {% if u.is_active %}
+            <span style="color:var(--accent2);font-weight:600;">● Active</span>
+            {% else %}
+            <span style="color:var(--danger);font-weight:600;">● Disabled</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.profile.pin %}
+            <span style="color:var(--accent2);">✓ Set</span>
+            {% else %}
+            <span style="color:var(--muted);">None</span>
+            {% endif %}
+          </td>
+          <td style="display:flex;gap:5px;flex-wrap:wrap;">
+            {% if u != request.user %}
+            <button class="btn btn-primary btn-xs" onclick="openPasswordModal({{ u.id }}, '{{ u.username }}')">
+              Reset Password
+            </button>
+            {% if u.profile.pin %}
+            <form method="post" style="display:inline;" onsubmit="return confirm('Clear PIN for {{ u.username }}?')">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="reset_pin">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <button type="submit" class="btn btn-ghost btn-xs">Clear PIN</button>
+            </form>
+            {% endif %}
+            <form method="post" style="display:inline;" onsubmit="return confirm('{% if u.is_active %}Disable{% else %}Enable{% endif %} {{ u.username }}?')">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="toggle_active">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <button type="submit" class="btn btn-ghost btn-xs" style="color:{% if u.is_active %}var(--danger){% else %}var(--accent2){% endif %};">
+                {% if u.is_active %}Disable{% else %}Enable{% endif %}
+              </button>
+            </form>
+            {% else %}
+            <span style="font-size:12px;color:var(--muted);">(your account)</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Password Reset Modal -->
+<div class="modal-overlay" id="passwordModal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal">
+    <div class="modal-title">Reset Password</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+      Setting a new password for <strong id="pwUsername"></strong>. They will need to use this password to log in.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="reset_password">
+      <input type="hidden" name="user_id" id="pwUserId">
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="text" name="new_password" id="newPasswordField" placeholder="Enter new password..." required minlength="4">
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px;">
+        Minimum 4 characters. Write it down and give it to the cashier.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('passwordModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-primary">Reset Password</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openPasswordModal(userId, username) {
+  document.getElementById('pwUserId').value = userId;
+  document.getElementById('pwUsername').textContent = username;
+  document.getElementById('newPasswordField').value = '';
+  document.getElementById('passwordModal').style.display = 'flex';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PIN Login — SmartPOS</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:#0d0f12;color:#e8eaf2;min-height:100vh;display:flex;align-items:center;justify-content:center;}
+.container{width:100%;max-width:340px;padding:20px;}
+.logo{text-align:center;margin-bottom:32px;}
+.logo-mark{font-size:36px;color:#4f9cff;}
+.logo-text{font-size:22px;font-weight:600;letter-spacing:.5px;margin-top:4px;}
+.logo-sub{font-size:12px;color:#7a84a0;margin-top:4px;}
+.card{background:#141720;border:1px solid #262d3d;border-radius:14px;padding:28px;}
+.card-title{font-size:15px;font-weight:600;text-align:center;margin-bottom:6px;}
+.card-sub{font-size:12px;color:#7a84a0;text-align:center;margin-bottom:24px;}
+.pin-display{background:#1c2130;border:1px solid #262d3d;border-radius:10px;padding:14px;text-align:center;font-family:'DM Mono',monospace;font-size:28px;font-weight:500;letter-spacing:12px;margin-bottom:20px;min-height:58px;color:#4f9cff;}
+.pin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
+.pin-btn{padding:16px;background:#1c2130;border:1px solid #262d3d;border-radius:10px;color:#e8eaf2;font-size:18px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;text-align:center;}
+.pin-btn:hover{background:#262d3d;border-color:#4f9cff;color:#4f9cff;}
+.pin-btn:active{transform:scale(.95);}
+.pin-btn.del{color:#ff5f6d;font-size:14px;}
+.pin-btn.clear{color:#7a84a0;font-size:13px;}
+.submit-btn{width:100%;padding:14px;background:#4f9cff;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .15s;margin-bottom:12px;}
+.submit-btn:hover{background:#3a8cf0;}
+.alt-link{text-align:center;font-size:13px;color:#7a84a0;}
+.alt-link a{color:#4f9cff;}
+.error{background:rgba(255,95,109,.1);border:1px solid rgba(255,95,109,.25);color:#ff5f6d;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">
+    <div class="logo-mark">⬡</div>
+    <div class="logo-text">SmartPOS</div>
+    <div class="logo-sub">Quick PIN Access</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Enter PIN</div>
+    <div class="card-sub">Enter your 4-digit PIN to sign in</div>
+
+    {% if messages %}
+    {% for msg in messages %}
+    <div class="error">{{ msg }}</div>
+    {% endfor %}
+    {% endif %}
+
+    <div class="pin-display" id="pinDisplay">____</div>
+
+    <form method="post" id="pinForm">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <input type="hidden" name="pin" id="pinInput">
+
+      <div class="pin-grid">
+        {% for n in "123456789" %}
+        <button type="button" class="pin-btn" onclick="addDigit('{{ n }}')">{{ n }}</button>
+        {% endfor %}
+        <button type="button" class="pin-btn clear" onclick="clearPin()">CLR</button>
+        <button type="button" class="pin-btn" onclick="addDigit('0')">0</button>
+        <button type="button" class="pin-btn del" onclick="delDigit()">⌫</button>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submitBtn" disabled>Sign In →</button>
+    </form>
+
+    <div class="alt-link">
+      Use password instead? <a href="{% url 'login' %}">Login</a>
+    </div>
+  </div>
+</div>
+
+<script>
+let pin = '';
+function updateDisplay() {
+  const display = document.getElementById('pinDisplay');
+  const filled = '●'.repeat(pin.length);
+  const empty = '_'.repeat(4 - pin.length);
+  display.textContent = filled + empty;
+  document.getElementById('pinInput').value = pin;
+  document.getElementById('submitBtn').disabled = pin.length < 4;
+}
+function addDigit(d) {
+  if (pin.length < 4) { pin += d; updateDisplay(); }
+  if (pin.length === 4) document.getElementById('pinForm').submit();
+}
+function delDigit() { pin = pin.slice(0, -1); updateDisplay(); }
+function clearPin() { pin = ''; updateDisplay(); }
+updateDisplay();
+</script>
+</body>
+</html>

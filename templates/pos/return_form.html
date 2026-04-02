@@ -1,0 +1,52 @@
+{% extends "pos/base.html" %}
+{% block title %}Process Return — SmartPOS{% endblock %}
+{% block page_title %}Process Return — #{{ sale.sale_number }}{% endblock %}
+
+{% block content %}
+<div style="max-width:600px;">
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Sale Details</div>
+    <div style="display:flex;gap:24px;font-size:13.5px;">
+      <div><span style="color:var(--muted);">Date:</span> {{ sale.created_at|date:"d M Y H:i" }}</div>
+      <div><span style="color:var(--muted);">Total:</span> Rs {{ sale.total_amount }}</div>
+      <div><span style="color:var(--muted);">Customer:</span> {{ sale.customer.name|default:"Walk-in" }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Select Item to Return</div>
+    <form method="post">
+      {% csrf_token %}
+      {% for item in sale.items.all %}
+      {% if item.returnable_quantity > 0 %}
+      <div style="background:var(--surface2);border-radius:8px;padding:16px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div>
+            <div style="font-weight:500;font-size:14px;">{{ item.product_name }}</div>
+            <div style="font-size:12px;color:var(--muted);">Qty: {{ item.quantity }} · Returnable: {{ item.returnable_quantity }} · Rs {{ item.unit_price }} each</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;">
+          <div style="flex:1;">
+            <label>Qty to Return</label>
+            <input type="number" name="quantity" min="1" max="{{ item.returnable_quantity }}" value="1">
+          </div>
+          <div style="flex:2;">
+            <label>Reason</label>
+            <input type="text" name="reason" placeholder="Optional reason...">
+          </div>
+          <input type="hidden" name="item_id" value="{{ item.id }}">
+          <button type="submit" class="btn btn-danger" style="align-self:flex-end;">Process Return</button>
+        </div>
+      </div>
+      {% else %}
+      <div style="padding:12px;color:var(--muted);font-size:13px;border-bottom:1px solid var(--border);">
+        {{ item.product_name }} — <span class="badge badge-red">Fully returned</span>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </form>
+    <a href="{% url 'sales' %}" class="btn btn-ghost btn-sm" style="margin-top:16px;">← Back to Sales</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "pos/base.html" %}
+{% block title %}Stores — SmartPOS{% endblock %}
+{% block page_title %}Multi-Store Management{% endblock %}
+{% block topbar_actions %}<a href="{% url 'store_add' %}" class="btn btn-primary btn-sm">⊕ Add Store</a>{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Store Name</th><th>Phone</th><th>Email</th><th>Tax Rate</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for s in stores %}
+        <tr>
+          <td><span style="font-weight:500;">{{ s.name }}</span></td>
+          <td>{{ s.phone|default:"—" }}</td>
+          <td>{{ s.email|default:"—" }}</td>
+          <td style="font-family:'DM Mono',monospace;">{{ s.tax_rate }}%</td>
+          <td style="color:var(--muted);font-size:12px;">{{ s.created_at|date:"d M Y" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:32px;">No stores yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

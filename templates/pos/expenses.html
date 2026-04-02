@@ -1,0 +1,160 @@
+{% extends "pos/base.html" %}
+{% block title %}Expenses — SmartPOS{% endblock %}
+{% block page_title %}Expense Tracker{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-primary btn-sm" onclick="document.getElementById('addExpenseModal').style.display='flex'">+ Add Expense</button>
+<button class="btn btn-ghost btn-sm" onclick="document.getElementById('addCategoryModal').style.display='flex'">+ Category</button>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;}
+.modal-overlay.show{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;max-width:420px;width:90%;}
+.modal-title{font-size:16px;font-weight:600;margin-bottom:20px;}
+.modal-footer{display:flex;gap:10px;margin-top:20px;justify-content:flex-end;}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card danger">
+    <div class="stat-label">Total Expenses</div>
+    <div class="stat-value">Rs {{ total|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">This Period</div>
+    <div class="stat-value">{{ expenses|length }} entries</div>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom:16px;">
+  <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+    <div class="form-group" style="margin:0;">
+      <label>From</label>
+      <input type="date" name="date_from" value="{{ date_from }}" style="width:160px;">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label>To</label>
+      <input type="date" name="date_to" value="{{ date_to }}" style="width:160px;">
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+    <a href="{% url 'expenses' %}" class="btn btn-ghost btn-sm">Clear</a>
+  </form>
+</div>
+
+<!-- Expenses Table -->
+<div class="card">
+  <div class="card-title">Expense Records</div>
+  {% if expenses %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Title</th>
+          <th>Category</th>
+          <th>Added By</th>
+          <th>Notes</th>
+          <th style="text-align:right;">Amount</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in expenses %}
+        <tr>
+          <td style="color:var(--muted);">{{ e.date|date:"d M Y" }}</td>
+          <td style="font-weight:500;">{{ e.title }}</td>
+          <td><span class="badge badge-gray">{{ e.category.name|default:"—" }}</span></td>
+          <td style="color:var(--muted);">{{ e.added_by.username|default:"—" }}</td>
+          <td style="color:var(--muted);font-size:12px;">{{ e.notes|truncatechars:40 }}</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;color:var(--danger);font-weight:600;">Rs {{ e.amount|floatformat:2 }}</td>
+          <td>
+            <form method="post" style="display:inline;" onsubmit="return confirm('Delete this expense?')">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete_expense">
+              <input type="hidden" name="expense_id" value="{{ e.id }}">
+              <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--danger);">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5" style="font-weight:600;padding:12px 14px;">Total</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:700;color:var(--danger);font-size:15px;padding:12px 14px;">Rs {{ total|floatformat:2 }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;color:var(--muted);padding:40px;">No expenses recorded yet. Click "Add Expense" to start.</div>
+  {% endif %}
+</div>
+
+<!-- Add Expense Modal -->
+<div class="modal-overlay" id="addExpenseModal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal">
+    <div class="modal-title">Add Expense</div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_expense">
+      <div class="form-group">
+        <label>Title</label>
+        <input type="text" name="title" placeholder="e.g. Electricity bill" required>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Amount (Rs)</label>
+          <input type="number" name="amount" placeholder="0.00" step="0.01" min="0" required>
+        </div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" name="date" value="{% now 'Y-m-d' %}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select name="category">
+          <option value="">— No Category —</option>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Notes (optional)</label>
+        <textarea name="notes" rows="2"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('addExpenseModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Expense</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add Category Modal -->
+<div class="modal-overlay" id="addCategoryModal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal">
+    <div class="modal-title">Add Expense Category</div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_category">
+      <div class="form-group">
+        <label>Category Name</label>
+        <input type="text" name="cat_name" placeholder="e.g. Utilities, Rent, Salaries" required>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('addCategoryModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Category</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

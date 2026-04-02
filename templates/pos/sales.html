@@ -1,0 +1,123 @@
+{% extends "pos/base.html" %}
+{% block title %}Sales — SmartPOS{% endblock %}
+{% block page_title %}Sales History{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'export_sales' %}" class="btn btn-ghost btn-sm">↓ Export CSV</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filter card — all values now properly preserved after filtering -->
+<div class="card" style="margin-bottom:16px;">
+  <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+    <div class="form-group" style="margin:0;min-width:160px;">
+      <label>From</label>
+      <input type="date" name="date_from" value="{{ date_from|default:'' }}">
+    </div>
+    <div class="form-group" style="margin:0;min-width:160px;">
+      <label>To</label>
+      <input type="date" name="date_to" value="{{ date_to|default:'' }}">
+    </div>
+    <div class="form-group" style="margin:0;min-width:160px;">
+      <label>Cashier</label>
+      <select name="cashier">
+        <option value="">All Cashiers</option>
+        {% for c in cashiers %}
+        <!-- Preserve selected cashier after form submit -->
+        <option value="{{ c.id }}" {% if request.GET.cashier == c.id|stringformat:"s" %}selected{% endif %}>{{ c.username }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group" style="margin:0;min-width:160px;">
+      <label>Payment</label>
+      <select name="payment">
+        <option value="">All Methods</option>
+        <option value="cash"   {% if request.GET.payment == 'cash'   %}selected{% endif %}>💵 Cash</option>
+        <option value="card"   {% if request.GET.payment == 'card'   %}selected{% endif %}>💳 Card</option>
+        <option value="online" {% if request.GET.payment == 'online' %}selected{% endif %}>📱 Online</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin:0;min-width:200px;">
+      <label>Search</label>
+      <!-- Preserve search query after submit -->
+      <input type="text" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Sale # or customer…">
+    </div>
+    <div style="display:flex;gap:8px;align-self:flex-end;">
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+      <a href="{% url 'sales' %}" class="btn btn-ghost btn-sm">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div class="card-title" style="margin:0;">Transactions</div>
+    <div style="font-size:12px;color:var(--muted);">Showing {{ sales|length }} record{{ sales|length|pluralize }}</div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Sale #</th>
+          <th>Date</th>
+          <th>Cashier</th>
+          <th>Customer</th>
+          <th>Items</th>
+          <th>Total</th>
+          <th>Payment</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sale in sales %}
+        <tr>
+          <td><code style="font-family:'DM Mono',monospace;font-size:12px;color:var(--accent);">{{ sale.sale_number }}</code></td>
+          <td style="font-size:12px;color:var(--muted);white-space:nowrap;">{{ sale.created_at|date:"d M Y H:i" }}</td>
+          <td>{{ sale.cashier.username|default:"—" }}</td>
+          <td>{{ sale.customer.name|default:"Walk-in" }}</td>
+          <td style="color:var(--muted);">{{ sale.items.count }}</td>
+          <td style="font-family:'DM Mono',monospace;font-weight:500;">Rs {{ sale.total_amount }}</td>
+          <td>
+            {% if sale.payment_method == 'cash' %}💵 Cash
+            {% elif sale.payment_method == 'card' %}💳 Card
+            {% else %}📱 Online{% endif %}
+          </td>
+          <td>
+            {% if sale.status == 'completed' %}<span class="badge badge-green">Completed</span>
+            {% elif sale.status == 'refunded' %}<span class="badge badge-red">Refunded</span>
+            {% else %}<span class="badge badge-warn">Part. Refund</span>{% endif %}
+          </td>
+          <td>
+            <div style="display:flex;gap:6px;">
+              <a href="{% url 'receipt' sale.id %}" class="btn btn-ghost btn-xs" target="_blank">Receipt</a>
+              {% if sale.status == 'completed' %}
+              <a href="{% url 'process_return' sale.id %}" class="btn btn-ghost btn-xs">Return</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:40px;">
+          <div style="font-size:32px;opacity:.2;margin-bottom:8px;">📋</div>
+          No sales found for the selected filters
+        </td></tr>
+        {% endfor %}
+      </tbody>
+      {% if sales %}
+      <tfoot>
+        <tr style="background:var(--surface2);">
+          <td colspan="4" style="font-weight:600;padding:12px 14px;font-size:13px;">
+            Showing {{ sales|length }} sale{{ sales|length|pluralize }}
+          </td>
+          <td colspan="5" style="text-align:right;padding:12px 14px;font-size:12px;color:var(--muted);">
+            Scroll up to change filters
+          </td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+{% endblock %}

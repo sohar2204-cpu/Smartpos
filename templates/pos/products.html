@@ -1,0 +1,109 @@
+{% extends "pos/base.html" %}
+{% block title %}Products — SmartPOS{% endblock %}
+{% block page_title %}Products{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'product_add' %}" class="btn btn-primary btn-sm">⊕ Add Product</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filter bar — import form is now SEPARATE (was incorrectly nested inside filter form before) -->
+<div class="card" style="margin-bottom:16px;">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+
+    <form method="get" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;flex:1;min-width:0;">
+      <input type="text" name="q" value="{{ search }}" placeholder="Search by name or barcode…" style="max-width:240px;">
+      <select name="category" style="max-width:180px;">
+        <option value="">All Categories</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {% if selected_category == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="stock_status" style="max-width:160px;">
+        <option value="">All Stock</option>
+        <option value="in"  {% if request.GET.stock_status == 'in'  %}selected{% endif %}>In Stock</option>
+        <option value="low" {% if request.GET.stock_status == 'low' %}selected{% endif %}>Low Stock</option>
+        <option value="out" {% if request.GET.stock_status == 'out' %}selected{% endif %}>Out of Stock</option>
+      </select>
+      <button type="submit" class="btn btn-ghost btn-sm">Filter</button>
+      <a href="{% url 'products' %}" class="btn btn-ghost btn-sm">Reset</a>
+    </form>
+
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <a href="{% url 'export_products' %}" class="btn btn-ghost btn-sm">↓ Export CSV</a>
+    </div>
+  </div>
+
+  <!-- CSV Import — separate form, no longer nested inside filter form -->
+  <form method="post" action="{% url 'product_import' %}" enctype="multipart/form-data"
+        style="display:flex;gap:8px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+    {% csrf_token %}
+    <span style="font-size:12px;color:var(--muted);">Import CSV:</span>
+    <input type="file" name="csv_file" accept=".csv" style="width:200px;padding:5px 8px;font-size:12px;">
+    <button type="submit" class="btn btn-ghost btn-sm">↑ Import</button>
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div class="card-title" style="margin:0;">Products</div>
+    <div style="font-size:12px;color:var(--muted);">{{ products|length }} result{{ products|length|pluralize }}</div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Barcode</th>
+          <th>Category</th>
+          <th>Cost</th>
+          <th>Price</th>
+          <th>Stock</th>
+          <th>Status</th>
+          <th>Supplier</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in products %}
+        <tr>
+          <td><div style="font-weight:500;">{{ p.name }}</div></td>
+          <td><code style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);">{{ p.barcode|default:"—" }}</code></td>
+          <td>{{ p.category.name|default:"—" }}</td>
+          <td style="font-family:'DM Mono',monospace;color:var(--muted);">Rs {{ p.cost_price|floatformat:2|default:"—" }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ p.price }}</td>
+          <td>
+            <span style="font-family:'DM Mono',monospace;font-weight:{% if p.stock_quantity == 0 %}700{% else %}400{% endif %};color:{% if p.stock_quantity == 0 %}var(--danger){% elif p.is_low_stock %}var(--warn){% else %}var(--text){% endif %};">
+              {{ p.stock_quantity }}
+            </span>
+          </td>
+          <td>
+            {% if p.is_out_of_stock %}
+            <span class="badge badge-red">Out of Stock</span>
+            {% elif p.is_low_stock %}
+            <span class="badge badge-warn">Low Stock</span>
+            {% else %}
+            <span class="badge badge-green">In Stock</span>
+            {% endif %}
+          </td>
+          <td>{{ p.supplier.name|default:"—" }}</td>
+          <td>
+            <div style="display:flex;gap:6px;">
+              <a href="{% url 'product_edit' p.pk %}" class="btn btn-ghost btn-xs">Edit</a>
+              <form method="post" action="{% url 'product_delete' p.pk %}" style="display:inline;"
+                    onsubmit="return confirm('Delete {{ p.name }}?')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger btn-xs">Del</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:40px;">No products found</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,322 @@
+{% extends 'pos/base.html' %}
+{% block title %}Currency Settings{% endblock %}
+{% block content %}
+<style>
+  .currency-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:20px;}
+  .currency-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);padding:14px;cursor:pointer;transition:all .15s;text-align:center;}
+  .currency-card:hover{border-color:var(--accent);}
+  .currency-card.selected{border-color:var(--accent);background:rgba(79,156,255,.1);}
+  .currency-card .sym{font-size:26px;font-weight:800;color:var(--accent);}
+  .currency-card .code{font-size:12px;font-weight:600;margin:3px 0;}
+  .currency-card .name{font-size:10px;color:var(--muted);}
+  .section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:18px;}
+  .section-title{font-size:15px;font-weight:700;margin-bottom:4px;}
+  .section-sub{font-size:12px;color:var(--muted);margin-bottom:16px;}
+  .form-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+  .preview-box{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:14px;}
+  .preview-amount{font-size:26px;font-weight:800;color:var(--accent);}
+  .rate-result{display:none;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);border-radius:8px;padding:14px;margin-top:12px;}
+  .rate-error{display:none;background:rgba(255,95,109,.08);border:1px solid rgba(255,95,109,.3);border-radius:8px;padding:12px;margin-top:10px;color:#ff5f6d;font-size:13px;}
+  .badge-free{background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge-paid{background:rgba(79,156,255,.15);color:#4f9cff;border:1px solid rgba(79,156,255,.3);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+  .key-input-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .spin{display:inline-block;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+
+<!-- Header -->
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+  <div>
+    <div style="font-size:22px;font-weight:700;">&#x1F4B1; Currency Settings</div>
+    <div style="color:var(--muted);font-size:13px;margin-top:2px;">Manual entry always works &middot; API key optional for automation</div>
+  </div>
+  <div style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#10b981;padding:8px 14px;border-radius:var(--radius);font-weight:600;font-size:14px;">
+    Current: {{ settings.currency_symbol }} &mdash; {{ settings.currency_code }} &middot; Rate: {{ settings.exchange_rate }}
+  </div>
+</div>
+
+<!-- SECTION 1: MANUAL -->
+<div class="section">
+  <div class="section-title">&#x270F;&#xFE0F; Manual Rate Entry</div>
+  <div class="section-sub">Always works &mdash; no internet needed. Select currency and type the rate yourself.</div>
+
+  <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">Select Currency</div>
+  <div class="currency-grid">
+    {% for code, symbol, name in currencies %}
+    <div class="currency-card {% if settings.currency_code == code %}selected{% endif %}"
+         onclick="selectCurrency('{{ code }}','{{ symbol }}',this)">
+      <div class="sym">{{ symbol }}</div>
+      <div class="code">{{ code }}</div>
+      <div class="name">{{ name }}</div>
+    </div>
+    {% endfor %}
+    <div class="currency-card" onclick="selectCustom(this)">
+      <div class="sym">&#x270F;&#xFE0F;</div>
+      <div class="code">Custom</div>
+      <div class="name">Define your own</div>
+    </div>
+  </div>
+
+  <form method="post" id="currencyForm">
+    {% csrf_token %}
+    <div class="form-row">
+      <div>
+        <label class="form-label">Currency Code</label>
+        <input type="text" name="currency_code" id="currencyCode" class="form-control"
+               value="{{ settings.currency_code }}" placeholder="PKR, USD...">
+      </div>
+      <div>
+        <label class="form-label">Currency Symbol</label>
+        <input type="text" name="currency_symbol" id="currencySymbol" class="form-control"
+               value="{{ settings.currency_symbol }}" placeholder="Rs, $, EUR...">
+      </div>
+      <div>
+        <label class="form-label">Exchange Rate</label>
+        <input type="number" name="exchange_rate" id="exchangeRate" class="form-control"
+               value="{{ settings.exchange_rate }}" step="0.000001" min="0.000001"
+               oninput="updatePreview()">
+      </div>
+    </div>
+
+    <div id="customSymbolRow" style="display:none;margin-bottom:14px;">
+      <label class="form-label">Custom Symbol</label>
+      <input type="text" name="custom_symbol" id="customSymbol" class="form-control"
+             placeholder="Type any symbol" style="max-width:180px;" oninput="updatePreview()">
+    </div>
+
+    <div class="preview-box">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Live Preview</div>
+      <div style="display:flex;gap:28px;flex-wrap:wrap;">
+        <div><div style="font-size:10px;color:var(--muted);">Small</div><div class="preview-amount" id="p1">Rs 250.00</div></div>
+        <div><div style="font-size:10px;color:var(--muted);">Sale</div><div class="preview-amount" id="p2">Rs 4,500.00</div></div>
+        <div><div style="font-size:10px;color:var(--muted);">Daily</div><div class="preview-amount" id="p3">Rs 85,000.00</div></div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px;">
+      <button type="submit" class="btn btn-primary">&#x1F4BE; Save Settings</button>
+    </div>
+  </form>
+</div>
+
+<!-- SECTION 2: AUTO FETCH -->
+<div class="section">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+    <div class="section-title">&#x1F310; Auto-Fetch Live Rate</div>
+    <span id="apiBadge">
+      {% if settings.exchange_rate_api_key %}
+        <span class="badge-paid">&#x1F511; API Key Active</span>
+      {% else %}
+        <span class="badge-free">Free Mode (no key needed)</span>
+      {% endif %}
+    </span>
+  </div>
+  <div class="section-sub">Fetch today's real exchange rate from internet. Works free without any key.</div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+    <div>
+      <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Base Currency</label>
+      <select id="liveBase" class="form-control" style="min-width:110px;">
+        {% for code, symbol, name in currencies %}
+        <option value="{{ code }}" {% if settings.currency_code == code %}selected{% endif %}>{{ code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="padding-bottom:9px;font-weight:700;color:var(--muted);">&rarr;</div>
+    <div>
+      <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Convert To</label>
+      <select id="liveTarget" class="form-control" style="min-width:110px;">
+        {% for code, symbol, name in currencies %}
+        <option value="{{ code }}">{{ code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="font-size:11px;color:transparent;display:block;margin-bottom:4px;">x</label>
+      <button class="btn btn-primary" onclick="fetchRate(false)" id="fetchBtn">&#x1F504; Fetch Rate</button>
+    </div>
+    <div>
+      <label style="font-size:11px;color:transparent;display:block;margin-bottom:4px;">x</label>
+      <button class="btn" onclick="fetchRate(true)" id="fetchSaveBtn"
+        style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.4);color:#10b981;padding:8px 16px;border-radius:6px;cursor:pointer;">
+        &#x2705; Fetch &amp; Save
+      </button>
+    </div>
+  </div>
+
+  <div class="rate-result" id="rateResult">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div style="font-size:11px;color:var(--muted);" id="rateLabel">1 PKR =</div>
+        <div style="font-size:28px;font-weight:800;color:#10b981;" id="rateValue">&mdash;</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="rateMeta"></div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:10px;color:var(--muted);">Source</div>
+        <div style="font-size:12px;font-weight:600;color:var(--accent);" id="rateSource">&mdash;</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+      <button onclick="applyToForm()" id="applyBtn"
+        style="font-size:12px;padding:5px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:5px;cursor:pointer;">
+        &#x1F4CB; Apply to form above
+      </button>
+      <span style="font-size:11px;color:var(--muted);margin-left:8px;">or use Fetch &amp; Save to auto-save</span>
+    </div>
+  </div>
+  <div class="rate-error" id="rateError"></div>
+</div>
+
+<!-- SECTION 3: API KEY -->
+<div class="section">
+  <div class="section-title">&#x1F511; API Key <span style="font-size:12px;font-weight:400;color:var(--muted);">(Optional)</span></div>
+  <div class="section-sub">
+    Without key: uses open.er-api.com &mdash; 100% free, no signup, 1,500 requests/month (enough for daily use).<br>
+    With key: uses exchangerate-api.com &mdash; same free tier but higher limits available if needed.
+  </div>
+
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;">
+    <div style="font-weight:600;margin-bottom:10px;">&#x1F4CB; How to get a free API key (takes 2 minutes):</div>
+    <div style="display:flex;flex-direction:column;gap:6px;color:var(--text);">
+      <div>1&#xFE0F;&#x20E3; Go to <strong>exchangerate-api.com</strong></div>
+      <div>2&#xFE0F;&#x20E3; Click <strong>"Get Free Key"</strong> &mdash; enter your email only</div>
+      <div>3&#xFE0F;&#x20E3; Check email &rarr; verify &rarr; copy the API key</div>
+      <div>4&#xFE0F;&#x20E3; Paste below &rarr; Save Key &mdash; done!</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--muted);">Free plan: 1,500 requests/month &middot; No credit card needed ever</div>
+    </div>
+  </div>
+
+  <div class="key-input-row">
+    <input type="text" id="apiKeyInput" class="form-control"
+           style="max-width:420px;font-family:monospace;font-size:13px;"
+           value="{{ settings.exchange_rate_api_key }}"
+           placeholder="Paste your API key here (or leave blank for free mode)">
+    <button onclick="saveApiKey()" class="btn btn-primary" id="saveKeyBtn">&#x1F4BE; Save Key</button>
+    {% if settings.exchange_rate_api_key %}
+    <button onclick="removeApiKey()"
+      style="background:rgba(255,95,109,.1);border:1px solid rgba(255,95,109,.3);color:#ff5f6d;padding:8px 14px;border-radius:6px;cursor:pointer;">
+      &#x1F5D1; Remove
+    </button>
+    {% endif %}
+  </div>
+  <div id="keyStatus" style="font-size:12px;margin-top:8px;display:none;"></div>
+
+  <div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);">
+    &#x1F4A1; <strong>Bottom line:</strong> For most shops doing 1 rate check per day &mdash; you never need an API key.
+    The free mode works perfectly. The API key is just there if you want to fetch rates many times per day.
+  </div>
+</div>
+
+<script>
+let fetchedRate = null;
+
+async function fetchRate(autoSave) {
+  const base   = document.getElementById('liveBase').value;
+  const target = document.getElementById('liveTarget').value;
+  const btn    = autoSave ? document.getElementById('fetchSaveBtn') : document.getElementById('fetchBtn');
+  const orig   = btn.innerHTML;
+  document.getElementById('rateResult').style.display = 'none';
+  document.getElementById('rateError').style.display  = 'none';
+  btn.innerHTML = '<span class="spin">&#x21BB;</span> Fetching...';
+  btn.disabled  = true;
+  try {
+    const res  = await fetch(`/currency/live-rate/?base=${base}&target=${target}${autoSave ? '&save=1' : ''}`);
+    const data = await res.json();
+    if (data.success) {
+      fetchedRate = data.rate;
+      document.getElementById('rateLabel').textContent  = `1 ${data.base} =`;
+      document.getElementById('rateValue').textContent  = `${data.rate} ${data.target}` + (autoSave ? ' Saved!' : '');
+      document.getElementById('rateMeta').textContent   = `Updated: ${data.last_updated}`;
+      document.getElementById('rateSource').textContent = data.source;
+      document.getElementById('rateResult').style.display = 'block';
+      document.getElementById('apiBadge').innerHTML = data.used_api_key
+        ? '<span class="badge-paid">API Key Active</span>'
+        : '<span class="badge-free">Free Mode (no key needed)</span>';
+      if (autoSave) {
+        document.getElementById('exchangeRate').value = data.rate;
+        updatePreview();
+      }
+    } else {
+      document.getElementById('rateError').textContent = 'Error: ' + data.error + ' - Check internet connection.';
+      document.getElementById('rateError').style.display = 'block';
+    }
+  } catch(e) {
+    document.getElementById('rateError').textContent = 'Cannot connect. Check your internet connection.';
+    document.getElementById('rateError').style.display = 'block';
+  }
+  btn.innerHTML = orig;
+  btn.disabled  = false;
+}
+
+function applyToForm() {
+  if (!fetchedRate) return;
+  document.getElementById('exchangeRate').value = fetchedRate;
+  updatePreview();
+  document.getElementById('applyBtn').textContent = 'Applied!';
+  setTimeout(() => document.getElementById('applyBtn').textContent = 'Apply to form above', 2000);
+}
+
+async function saveApiKey() {
+  const key = document.getElementById('apiKeyInput').value.trim();
+  const btn = document.getElementById('saveKeyBtn');
+  btn.textContent = 'Saving...';
+  btn.disabled    = true;
+  try {
+    const res  = await fetch('/currency/save-api-key/', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+      body: JSON.stringify({api_key: key})
+    });
+    const data = await res.json();
+    const st   = document.getElementById('keyStatus');
+    st.style.display = 'block';
+    if (data.success) {
+      st.textContent = key ? 'API key saved successfully.' : 'API key removed. Using free mode.';
+      st.style.color = '#10b981';
+    } else {
+      st.textContent = 'Error saving key.';
+      st.style.color = '#ff5f6d';
+    }
+  } catch(e) {
+    document.getElementById('keyStatus').textContent = 'Error: ' + e;
+    document.getElementById('keyStatus').style.display = 'block';
+  }
+  btn.textContent = 'Save Key';
+  btn.disabled    = false;
+}
+
+async function removeApiKey() {
+  document.getElementById('apiKeyInput').value = '';
+  await saveApiKey();
+}
+
+function selectCurrency(code, symbol, el) {
+  document.querySelectorAll('.currency-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('currencyCode').value   = code;
+  document.getElementById('currencySymbol').value = symbol;
+  document.getElementById('customSymbolRow').style.display = 'none';
+  document.getElementById('liveBase').value = code;
+  updatePreview();
+}
+
+function selectCustom(el) {
+  document.querySelectorAll('.currency-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('customSymbolRow').style.display = 'block';
+  updatePreview();
+}
+
+function updatePreview() {
+  const sym  = (document.getElementById('customSymbol') && document.getElementById('customSymbol').value)
+               || document.getElementById('currencySymbol').value || 'Rs';
+  const rate = parseFloat(document.getElementById('exchangeRate').value) || 1;
+  const fmt  = n => (n * rate).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  document.getElementById('p1').textContent = sym + ' ' + fmt(250);
+  document.getElementById('p2').textContent = sym + ' ' + fmt(4500);
+  document.getElementById('p3').textContent = sym + ' ' + fmt(85000);
+}
+
+updatePreview();
+</script>
+{% endblock %}

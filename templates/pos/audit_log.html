@@ -1,0 +1,141 @@
+{% extends 'pos/base.html' %}
+{% block title %}Audit Log{% endblock %}
+{% block content %}
+<style>
+  .audit-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
+  .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:var(--surface);padding:16px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:20px;}
+  .filters label{font-size:11px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;}
+  .filters input,.filters select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:13px;}
+  .audit-table{width:100%;border-collapse:collapse;}
+  .audit-table th{background:var(--surface2);color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);}
+  .audit-table td{padding:11px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:top;}
+  .audit-table tr:hover td{background:var(--surface2);}
+  .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge-login{background:rgba(16,185,129,.15);color:#10b981;}
+  .badge-logout{background:rgba(107,114,128,.15);color:#6b7280;}
+  .badge-sale{background:rgba(79,156,255,.15);color:#4f9cff;}
+  .badge-void{background:rgba(255,95,109,.15);color:#ff5f6d;}
+  .badge-product{background:rgba(6,182,212,.15);color:#06b6d4;}
+  .badge-price{background:rgba(245,158,11,.15);color:#f5a623;}
+  .badge-expense{background:rgba(139,92,246,.15);color:#8b5cf6;}
+  .badge-shift{background:rgba(16,185,129,.15);color:#10b981;}
+  .badge-backup{background:rgba(245,158,11,.15);color:#f5a623;}
+  .badge-settings{background:rgba(107,114,128,.15);color:#9ca3af;}
+  .badge-other{background:rgba(107,114,128,.15);color:#6b7280;}
+  .stat-bar{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;min-width:120px;}
+  .stat-card .val{font-size:22px;font-weight:700;color:var(--accent);}
+  .stat-card .lbl{font-size:11px;color:var(--muted);margin-top:2px;text-transform:uppercase;}
+  .ip{font-family:monospace;font-size:11px;color:var(--muted);}
+  .detail-text{color:var(--muted);font-size:12px;margin-top:2px;}
+  .empty-state{text-align:center;padding:60px 20px;color:var(--muted);}
+  .empty-state .icon{font-size:40px;margin-bottom:10px;opacity:.4;}
+</style>
+
+<div class="audit-header">
+  <div>
+    <div style="font-size:22px;font-weight:700;">🔍 Audit Log</div>
+    <div style="color:var(--muted);font-size:13px;margin-top:2px;">Complete record of every action in the system</div>
+  </div>
+  <div style="color:var(--muted);font-size:13px;">{{ total }} record{{ total|pluralize }} found</div>
+</div>
+
+<!-- Filters -->
+<form method="get">
+  <div class="filters">
+    <div>
+      <label>Action Type</label>
+      <select name="action">
+        <option value="">All Actions</option>
+        {% for val,label in action_choices %}
+          <option value="{{ val }}" {% if action_filter == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>User</label>
+      <input type="text" name="user" value="{{ user_filter }}" placeholder="Search username...">
+    </div>
+    <div>
+      <label>Date From</label>
+      <input type="date" name="date_from" value="{{ date_from }}">
+    </div>
+    <div>
+      <label>Date To</label>
+      <input type="date" name="date_to" value="{{ date_to }}">
+    </div>
+    <div style="display:flex;gap:8px;align-items:flex-end;">
+      <button type="submit" class="btn btn-primary" style="padding:7px 16px;font-size:13px;">Filter</button>
+      <a href="{% url 'audit_log' %}" class="btn" style="padding:7px 16px;font-size:13px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;text-decoration:none;">Reset</a>
+    </div>
+  </div>
+</form>
+
+<!-- Table -->
+<div class="card" style="padding:0;overflow:hidden;">
+  {% if logs %}
+  <table class="audit-table">
+    <thead>
+      <tr>
+        <th>Timestamp</th>
+        <th>User</th>
+        <th>Action</th>
+        <th>Details</th>
+        <th>IP Address</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted);font-size:12px;">
+          {{ log.timestamp|date:"d M Y" }}<br>
+          <span style="color:var(--text);font-weight:600;">{{ log.timestamp|time:"H:i:s" }}</span>
+        </td>
+        <td>
+          {% if log.user %}
+            <span style="font-weight:600;">{{ log.user.username }}</span>
+            <div style="font-size:11px;color:var(--muted);">
+              {% if log.user.profile.role == 'admin' %}👑 Admin
+              {% elif log.user.profile.role == 'manager' %}🗂 Manager
+              {% else %}🖥 Cashier{% endif %}
+            </div>
+          {% else %}
+            <span style="color:var(--muted);">System</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if log.action == 'login' %}<span class="badge badge-login">🔐 Login</span>
+          {% elif log.action == 'logout' %}<span class="badge badge-logout">🚪 Logout</span>
+          {% elif log.action == 'sale_complete' %}<span class="badge badge-sale">💰 Sale</span>
+          {% elif log.action == 'sale_void' %}<span class="badge badge-void">↩ Return</span>
+          {% elif log.action == 'product_add' %}<span class="badge badge-product">➕ Product Added</span>
+          {% elif log.action == 'product_edit' %}<span class="badge badge-product">✏ Product Edited</span>
+          {% elif log.action == 'product_delete' %}<span class="badge badge-void">🗑 Product Deleted</span>
+          {% elif log.action == 'price_change' %}<span class="badge badge-price">💲 Price Changed</span>
+          {% elif log.action == 'expense_add' %}<span class="badge badge-expense">📝 Expense Added</span>
+          {% elif log.action == 'expense_delete' %}<span class="badge badge-void">🗑 Expense Deleted</span>
+          {% elif log.action == 'shift_open' %}<span class="badge badge-shift">🟢 Shift Open</span>
+          {% elif log.action == 'shift_close' %}<span class="badge badge-shift">🔴 Shift Close</span>
+          {% elif log.action == 'backup' %}<span class="badge badge-backup">💾 Backup</span>
+          {% elif log.action == 'restore' %}<span class="badge badge-backup">📤 Restore</span>
+          {% elif log.action == 'settings_change' %}<span class="badge badge-settings">⚙ Settings</span>
+          {% else %}<span class="badge badge-other">{{ log.get_action_display }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <span style="font-size:13px;">{{ log.detail|default:"—" }}</span>
+        </td>
+        <td class="ip">{{ log.ip_address|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon">📋</div>
+    <div>No audit records found</div>
+    <div style="font-size:12px;margin-top:6px;">Actions will appear here as users interact with the system</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

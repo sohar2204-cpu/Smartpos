@@ -1,0 +1,91 @@
+{% extends "pos/base.html" %}
+{% block title %}Restore Backup — SmartPOS{% endblock %}
+{% block page_title %}Restore from Backup{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'backup' %}" class="btn btn-primary btn-sm">⬇ Download New Backup</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid-2" style="gap:20px;">
+
+  <!-- Upload Form -->
+  <div>
+    <div class="card" style="margin-bottom:16px;border-color:rgba(245,166,35,.3);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="font-size:22px;">⚠️</span>
+        <div>
+          <div style="font-weight:600;color:#f5a623;">Important Before Restoring</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">Restore will <strong>add or update</strong> Products, Customers, and Expenses from the backup file. It will NOT delete existing data. Always take a fresh backup before restoring.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Upload Backup File</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Upload a SmartPOS Excel backup file (.xlsx). Only Products, Customers, and Expenses will be restored.</p>
+
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="form-group">
+          <label>Select Backup File (.xlsx)</label>
+          <input type="file" name="backup_file" accept=".xlsx" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;" onclick="return confirm('Are you sure you want to restore from this backup? This will add/update existing records.')">
+          🔄 Restore from Backup
+        </button>
+      </form>
+    </div>
+
+    <!-- What gets restored -->
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">What Gets Restored</div>
+      <div style="font-size:13.5px;line-height:1.8;">
+        <div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;">
+          <span style="color:var(--accent2);">✓</span>
+          <span><strong>Products</strong> — Updated by barcode (adds new, updates existing stock/price)</span>
+        </div>
+        <div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;">
+          <span style="color:var(--accent2);">✓</span>
+          <span><strong>Customers</strong> — Added if not already existing</span>
+        </div>
+        <div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;">
+          <span style="color:var(--accent2);">✓</span>
+          <span><strong>Expenses</strong> — Added if not already existing</span>
+        </div>
+        <div style="padding:6px 0;display:flex;gap:10px;align-items:center;">
+          <span style="color:var(--muted);">—</span>
+          <span style="color:var(--muted);">Sales history cannot be restored (read-only in backup)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup History -->
+  <div class="card">
+    <div class="card-title">Backup History</div>
+    {% if backup_logs %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Filename</th><th>Created By</th><th>Date & Time</th></tr>
+        </thead>
+        <tbody>
+          {% for log in backup_logs %}
+          <tr>
+            <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);">{{ log.filename }}</td>
+            <td style="color:var(--muted);">{{ log.created_by.username|default:"—" }}</td>
+            <td style="color:var(--muted);font-size:12px;">{{ log.created_at|date:"d M Y, H:i" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="text-align:center;color:var(--muted);padding:32px;">No backups taken yet</div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,357 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" id="htmlRoot" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}SmartPOS{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script> 
+<style>
+:root{--bg:#0d0f12;--surface:#141720;--surface2:#1c2130;--border:#262d3d;--accent:#4f9cff;--accent2:#38e2b8;--danger:#ff5f6d;--warn:#f5a623;--text:#e8eaf2;--muted:#7a84a0;--radius:10px;--sidebar:220px;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;}
+a{color:inherit;text-decoration:none;}
+body.lang-ur{font-family:'Noto Nastaliq Urdu','DM Sans',sans-serif;direction:rtl;}
+body.lang-ur .sidebar{left:auto;right:0;border-right:none;border-left:1px solid var(--border);}
+body.lang-ur .main{margin-left:0;margin-right:var(--sidebar);}
+body.lang-ur .nav-item{border-left:none;border-right:3px solid transparent;}
+body.lang-ur .nav-item.active{border-left:none;border-right-color:var(--accent);}
+body.lang-ur .topbar{direction:rtl;}
+body.lang-ur .topbar-left{flex-direction:row-reverse;}
+body.lang-ur .content{direction:rtl;}
+body.lang-ur .sidebar-footer{direction:rtl;}
+body.lang-ur .sidebar-footer .user-chip{flex-direction:row-reverse;}
+body.lang-ur th{text-align:right;}
+.lang-toggle{display:flex;align-items:center;gap:3px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:3px;user-select:none;flex-shrink:0;}
+.lang-opt{padding:4px 12px;border-radius:16px;font-size:11px;font-weight:600;color:var(--muted);transition:all .2s;cursor:pointer;}
+.lang-opt.active{background:var(--accent);color:#fff;}
+.lang-opt.ur{font-family:'Noto Nastaliq Urdu',sans-serif;font-size:13px;line-height:1.6;}
+.sidebar{width:var(--sidebar);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transition:transform .25s ease;}
+.sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid var(--border);}
+.sidebar-logo .brand{font-size:17px;font-weight:600;letter-spacing:.5px;color:var(--accent);}
+.sidebar-logo .sub{font-size:11px;color:var(--muted);margin-top:2px;font-family:'DM Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;}
+.nav-group{margin-bottom:4px;}
+.nav-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:8px 20px 4px;font-weight:500;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 20px;font-size:13.5px;font-weight:400;color:var(--muted);transition:all .15s;border-left:3px solid transparent;cursor:pointer;}
+.nav-item:hover{color:var(--text);background:var(--surface2);}
+.nav-item.active{color:var(--accent);background:rgba(79,156,255,.08);border-left-color:var(--accent);}
+.nav-item.superadmin-link{color:#a78bfa;}
+.nav-item.superadmin-link:hover{color:#c4b5fd;background:rgba(167,139,250,.08);}
+.nav-item.superadmin-link.active{color:#a78bfa;background:rgba(167,139,250,.08);border-left-color:#a78bfa;}
+.nav-icon{width:16px;opacity:.8;flex-shrink:0;}
+.sidebar-footer{padding:16px 20px;border-top:1px solid var(--border);}
+.user-chip{display:flex;align-items:center;gap:10px;}
+.user-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;flex-shrink:0;}
+.user-name{font-size:13px;font-weight:500;}
+.user-role{font-size:11px;color:var(--muted);}
+.main{margin-left:var(--sidebar);flex:1;display:flex;flex-direction:column;min-height:100vh;transition:margin .25s;}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+.topbar-left{display:flex;align-items:center;gap:12px;}
+.topbar-title{font-size:16px;font-weight:600;}
+.topbar-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.hamburger{display:none;background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:6px 10px;color:var(--text);font-size:16px;line-height:1;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99;}
+.sidebar-overlay.show{display:block;}
+.content{padding:28px;flex:1;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;}
+.card-sm{padding:16px;}
+.card-title{font-size:13px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:16px;}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+.stat-label{font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:500;}
+.stat-value{font-size:24px;font-weight:600;font-family:'DM Mono',monospace;line-height:1;}
+.stat-card.accent{border-color:rgba(79,156,255,.3);background:rgba(79,156,255,.05);}
+.stat-card.green{border-color:rgba(56,226,184,.3);background:rgba(56,226,184,.05);}
+.stat-card.warn{border-color:rgba(245,166,35,.3);background:rgba(245,166,35,.05);}
+.stat-card.danger{border-color:rgba(255,95,109,.3);background:rgba(255,95,109,.05);}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:13.5px;font-weight:500;cursor:pointer;border:none;transition:all .15s;font-family:'DM Sans',sans-serif;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-primary:hover{background:#3a8cf0;}
+.btn-success{background:var(--accent2);color:#0d0f12;}
+.btn-danger{background:var(--danger);color:#fff;}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);}
+.btn-ghost:hover{color:var(--text);border-color:var(--accent);}
+.btn-sm{padding:5px 12px;font-size:12px;}
+.btn-xs{padding:3px 9px;font-size:11px;}
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:500;padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
+td{padding:11px 14px;font-size:13.5px;border-bottom:1px solid rgba(38,45,61,.5);}
+tr:hover td{background:rgba(255,255,255,.02);}
+tr:last-child td{border-bottom:none;}
+.form-group{margin-bottom:16px;}
+label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;}
+input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:9px 12px;font-size:13.5px;color:var(--text);font-family:'DM Sans',sans-serif;transition:border .15s;outline:none;}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+select option{background:var(--surface2);}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}
+.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px;}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;}
+.badge-green{background:rgba(56,226,184,.15);color:var(--accent2);}
+.badge-warn{background:rgba(245,166,35,.15);color:var(--warn);}
+.badge-red{background:rgba(255,95,109,.15);color:var(--danger);}
+.badge-blue{background:rgba(79,156,255,.15);color:var(--accent);}
+.badge-gray{background:rgba(122,132,160,.15);color:var(--muted);}
+.messages{padding:0 28px;padding-top:16px;}
+.msg{padding:10px 16px;border-radius:7px;font-size:13.5px;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+.msg-success{background:rgba(56,226,184,.1);border:1px solid rgba(56,226,184,.25);color:var(--accent2);}
+.msg-error{background:rgba(255,95,109,.1);border:1px solid rgba(255,95,109,.25);color:var(--danger);}
+.msg-warning{background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.25);color:var(--warn);}
+.search-bar{display:flex;gap:10px;margin-bottom:20px;align-items:center;flex-wrap:wrap;}
+.search-bar input{max-width:300px;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+@media(max-width:1024px){.charts-grid{grid-template-columns:1fr;}}
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%);}
+  .sidebar.open{transform:translateX(0);}
+  body.lang-ur .sidebar{transform:translateX(100%);}
+  body.lang-ur .sidebar.open{transform:translateX(0);}
+  .main{margin-left:0!important;margin-right:0!important;}
+  .hamburger{display:flex;align-items:center;justify-content:center;}
+  .grid-2,.grid-3,.charts-grid{grid-template-columns:1fr;}
+  .stats-grid{grid-template-columns:1fr 1fr;}
+  .content{padding:16px;}
+  .topbar{padding:0 16px;height:52px;}
+  .messages{padding:0 16px;padding-top:12px;}
+  table{min-width:500px;}
+}
+@media(max-width:480px){
+  .stats-grid{grid-template-columns:1fr;}
+  .stat-value{font-size:20px;}
+  .card{padding:14px;}
+  .search-bar input{max-width:100%;}
+  .btn-sm span{display:none;}
+}
+</style>
+{% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<script>
+const LANG_DICT = {
+  en: {
+    'nav.main':'Main','nav.inventory':'Inventory','nav.transactions':'Transactions',
+    'nav.people':'People','nav.operations':'Operations','nav.system':'System',
+    'nav.dashboard':'Dashboard','nav.pos':'POS Terminal','nav.products':'Products',
+    'nav.sales':'Sales History','nav.analytics':'Analytics','nav.profit':'Profit Report',
+    'nav.daily':'Daily Summary','nav.loyalty':'Loyalty Points',
+    'nav.customers':'Customers','nav.suppliers':'Suppliers','nav.expenses':'Expenses',
+    'nav.shift':'Cash Drawer','nav.reorder':'Reorder Alerts','nav.barcode':'Barcode Labels',
+    'nav.users':'Users','nav.stores':'Stores','nav.settings':'Settings',
+    'nav.whatsapp':'WhatsApp','nav.backup':'Backup DB','nav.restore':'Restore Backup',
+    'nav.audit':'Audit Log','nav.tax':'Tax Engine','nav.currency':'Currency',
+    'nav.pins':'PIN Management','nav.reset':'Reset Access','nav.admin':'Admin Panel',
+    'nav.superadmin':'Platform Admin','nav.signout':'Sign out',
+    'pos.customer':'Customer','pos.walkin':'Walk-in Customer',
+    'pos.barcode':'⊞ Barcode','pos.searchname':'⊙ Search by Name',
+    'pos.scanbarcode':'Scan barcode or type code...','pos.scan':'Scan',
+    'pos.typename':'Type product name...',
+    'pos.cart':'Cart','pos.clear':'Clear',
+    'pos.cartempty':'Cart is empty — scan or search a product',
+    'pos.discount':'Discount','pos.none':'None','pos.percentoff':'% Off','pos.rsoff':'Rs Off',
+    'pos.enteramt':'Enter amount...','pos.loyaltypts':'Loyalty Points',
+    'pos.selectcust':'Select a customer to use loyalty points',
+    'pos.available':'Available points:','pos.redeem':'Redeem points for this sale',
+    'pos.ptsinput':'Points to use...','pos.discount_lbl':'Discount:',
+    'pos.subtotal':'Subtotal','pos.tax':'Tax','pos.total':'Total',
+    'pos.disc_lbl':'Discount','pos.pts_disc':'Points Discount',
+    'pos.payment':'Payment','pos.cash':'💵 Cash','pos.card':'💳 Card','pos.online':'📱 Online',
+    'pos.received':'Amount Received','pos.change':'Change',
+    'pos.complete':'Complete Sale →','pos.processing':'Processing...',
+    'pos.salecomplete':'Sale Complete!','pos.receipt':'🖨 Receipt','pos.newsale':'New Sale',
+    'pos.stock':'Stock','pos.each':'each','pos.left':'left',
+    'pos.notfound':'No products found',
+    'common.save':'Save','common.cancel':'Cancel','common.delete':'Delete',
+    'common.edit':'Edit','common.add':'Add','common.search':'Search',
+  },
+  ur: {
+    'nav.main':'مرکزی','nav.inventory':'انوینٹری','nav.transactions':'لین دین',
+    'nav.people':'افراد','nav.operations':'آپریشنز','nav.system':'سسٹم',
+    'nav.dashboard':'ڈیش بورڈ','nav.pos':'پی او ایس','nav.products':'مصنوعات',
+    'nav.sales':'فروخت کی تاریخ','nav.analytics':'تجزیات','nav.profit':'منافع رپورٹ',
+    'nav.daily':'روزانہ خلاصہ','nav.loyalty':'وفاداری پوائنٹس',
+    'nav.customers':'گاہک','nav.suppliers':'سپلائرز','nav.expenses':'اخراجات',
+    'nav.shift':'کیش دراز','nav.reorder':'دوبارہ آرڈر','nav.barcode':'بارکوڈ لیبل',
+    'nav.users':'صارفین','nav.stores':'اسٹورز','nav.settings':'ترتیبات',
+    'nav.whatsapp':'واٹس ایپ','nav.backup':'بیک اپ','nav.restore':'بحال کریں',
+    'nav.audit':'آڈٹ لاگ','nav.tax':'ٹیکس انجن','nav.currency':'کرنسی',
+    'nav.pins':'پن مینجمنٹ','nav.reset':'رسائی ری سیٹ','nav.admin':'ایڈمن پینل',
+    'nav.superadmin':'پلیٹ فارم ایڈمن','nav.signout':'سائن آؤٹ',
+    'pos.customer':'گاہک','pos.walkin':'واک ان گاہک',
+    'pos.barcode':'⊞ بارکوڈ','pos.searchname':'⊙ نام سے تلاش',
+    'pos.scanbarcode':'بارکوڈ اسکین کریں یا کوڈ لکھیں...','pos.scan':'اسکین',
+    'pos.typename':'مصنوع کا نام لکھیں...',
+    'pos.cart':'کارٹ','pos.clear':'صاف کریں',
+    'pos.cartempty':'کارٹ خالی ہے — اسکین یا تلاش کریں',
+    'pos.discount':'رعایت','pos.none':'کوئی نہیں','pos.percentoff':'٪ رعایت','pos.rsoff':'روپے رعایت',
+    'pos.enteramt':'رقم درج کریں...','pos.loyaltypts':'وفاداری پوائنٹس',
+    'pos.selectcust':'پوائنٹس کے لیے گاہک منتخب کریں',
+    'pos.available':'دستیاب پوائنٹس:','pos.redeem':'اس فروخت پر پوائنٹس استعمال کریں',
+    'pos.ptsinput':'استعمال کرنے والے پوائنٹس...','pos.discount_lbl':'رعایت:',
+    'pos.subtotal':'ذیلی کل','pos.tax':'ٹیکس','pos.total':'کل رقم',
+    'pos.disc_lbl':'رعایت','pos.pts_disc':'پوائنٹس رعایت',
+    'pos.payment':'ادائیگی','pos.cash':'💵 نقد','pos.card':'💳 کارڈ','pos.online':'📱 آن لائن',
+    'pos.received':'موصول شدہ رقم','pos.change':'باقی رقم',
+    'pos.complete':'فروخت مکمل کریں ←','pos.processing':'پروسیسنگ...',
+    'pos.salecomplete':'فروخت مکمل!','pos.receipt':'🖨 رسید','pos.newsale':'نئی فروخت',
+    'pos.stock':'اسٹاک','pos.each':'فی یونٹ','pos.left':'باقی',
+    'pos.notfound':'کوئی مصنوع نہیں ملا',
+    'common.save':'محفوظ کریں','common.cancel':'منسوخ','common.delete':'حذف کریں',
+    'common.edit':'ترمیم','common.add':'شامل کریں','common.search':'تلاش',
+  }
+};
+
+function getLang(){ return localStorage.getItem('smartpos_lang') || 'en'; }
+function t(key){ const l=getLang(); return LANG_DICT[l][key]||LANG_DICT['en'][key]||key; }
+
+function applyLang(lang){
+  const isUr = lang==='ur';
+  document.getElementById('htmlRoot').setAttribute('lang',lang);
+  document.getElementById('htmlRoot').setAttribute('dir',isUr?'rtl':'ltr');
+  document.body.classList.toggle('lang-ur',isUr);
+  document.querySelectorAll('[data-t]').forEach(el=>{
+    const v=LANG_DICT[lang][el.dataset.t]||LANG_DICT['en'][el.dataset.t];
+    if(v) el.textContent=v;
+  });
+  document.querySelectorAll('[data-tp]').forEach(el=>{
+    const v=LANG_DICT[lang][el.dataset.tp]||LANG_DICT['en'][el.dataset.tp];
+    if(v) el.placeholder=v;
+  });
+  document.querySelectorAll('.lang-opt').forEach(b=>
+    b.classList.toggle('active',b.dataset.lang===lang)
+  );
+  localStorage.setItem('smartpos_lang',lang);
+  document.dispatchEvent(new CustomEvent('langchange',{detail:{lang}}));
+}
+function switchLang(lang){ applyLang(lang); }
+</script>
+
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="brand">⬡ SmartPOS</div>
+    <div class="sub">{% if request.user.profile.store %}{{ request.user.profile.store.name }}{% else %}Retail System{% endif %}</div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-label" data-t="nav.main">Main</div>
+      <a href="{% url 'dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◈</span> <span data-t="nav.dashboard">Dashboard</span></a>
+      <a href="{% url 'pos' %}" class="nav-item {% if request.resolver_match.url_name == 'pos' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◉</span> <span data-t="nav.pos">POS Terminal</span></a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label" data-t="nav.inventory">Inventory</div>
+      <a href="{% url 'products' %}" class="nav-item {% if 'product' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">▦</span> <span data-t="nav.products">Products</span></a>
+      <a href="{% url 'categories' %}" class="nav-item {% if 'category' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()">
+      <span class="nav-icon">◫</span> 
+      <span>Categories</span>
+    </a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label" data-t="nav.transactions">Transactions</div>
+      <a href="{% url 'sales' %}" class="nav-item {% if 'sale' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◎</span> <span data-t="nav.sales">Sales History</span></a>
+      <a href="{% url 'analytics' %}" class="nav-item {% if request.resolver_match.url_name == 'analytics' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◬</span> <span data-t="nav.analytics">Analytics</span></a>
+      <a href="{% url 'profit' %}" class="nav-item {% if request.resolver_match.url_name == 'profit' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◆</span> <span data-t="nav.profit">Profit Report</span></a>
+      <a href="{% url 'daily_summary' %}" class="nav-item {% if request.resolver_match.url_name == 'daily_summary' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◧</span> <span data-t="nav.daily">Daily Summary</span></a>
+      <a href="{% url 'loyalty_report' %}" class="nav-item {% if request.resolver_match.url_name == 'loyalty_report' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">⭑</span> <span data-t="nav.loyalty">Loyalty Points</span></a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label" data-t="nav.people">People</div>
+      <a href="{% url 'customers' %}" class="nav-item {% if 'customer' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◑</span> <span data-t="nav.customers">Customers</span></a>
+      <a href="{% url 'suppliers' %}" class="nav-item {% if 'supplier' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◒</span> <span data-t="nav.suppliers">Suppliers</span></a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label" data-t="nav.operations">Operations</div>
+      <a href="{% url 'expenses' %}" class="nav-item {% if request.resolver_match.url_name == 'expenses' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◈</span> <span data-t="nav.expenses">Expenses</span></a>
+      <a href="{% url 'shift' %}" class="nav-item {% if request.resolver_match.url_name == 'shift' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◉</span> <span data-t="nav.shift">Cash Drawer</span></a>
+      <a href="{% url 'reorder_alerts' %}" class="nav-item {% if request.resolver_match.url_name == 'reorder_alerts' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">▲</span> <span data-t="nav.reorder">Reorder Alerts</span></a>
+      <a href="{% url 'barcode_labels' %}" class="nav-item {% if request.resolver_match.url_name == 'barcode_labels' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">▦</span> <span data-t="nav.barcode">Barcode Labels</span></a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label" data-t="nav.system">System</div>
+      <a href="{% url 'users' %}" class="nav-item {% if 'user' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◐</span> <span data-t="nav.users">Users</span></a>
+      <a href="{% url 'stores' %}" class="nav-item {% if request.resolver_match.url_name == 'stores' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">▣</span> <span data-t="nav.stores">Stores</span></a>
+      <a href="{% url 'store_settings' %}" class="nav-item {% if request.resolver_match.url_name == 'store_settings' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">◎</span> <span data-t="nav.settings">Settings</span></a>
+      <a href="{% url 'whatsapp_settings' %}" class="nav-item {% if request.resolver_match.url_name == 'whatsapp_settings' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">💬</span> <span data-t="nav.whatsapp">WhatsApp</span></a>
+      <a href="{% url 'backup' %}" class="nav-item" onclick="closeSidebar()"><span class="nav-icon">⬇</span> <span data-t="nav.backup">Backup DB</span></a>
+      <a href="{% url 'restore_backup' %}" class="nav-item {% if request.resolver_match.url_name == 'restore_backup' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">↑</span> <span data-t="nav.restore">Restore Backup</span></a>
+      <a href="{% url 'cloud_backup' %}" class="nav-item {% if request.resolver_match.url_name == 'cloud_backup' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">☁</span> <span>Cloud Backup</span></a>
+
+      {% if request.user.profile.is_manager %}
+      <a href="{% url 'audit_log' %}" class="nav-item {% if request.resolver_match.url_name == 'audit_log' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">🔍</span> <span data-t="nav.audit">Audit Log</span></a>
+      <a href="{% url 'tax_rules' %}" class="nav-item {% if request.resolver_match.url_name == 'tax_rules' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">🧾</span> <span data-t="nav.tax">Tax Engine</span></a>
+      <a href="{% url 'currency_settings' %}" class="nav-item {% if request.resolver_match.url_name == 'currency_settings' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">💱</span> <span data-t="nav.currency">Currency</span></a>
+      {% endif %}
+
+      <a href="{% url 'manage_pins' %}" class="nav-item {% if request.resolver_match.url_name == 'manage_pins' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">🔢</span> <span data-t="nav.pins">PIN Management</span></a>
+      <a href="{% url 'reset_cashier' %}" class="nav-item {% if request.resolver_match.url_name == 'reset_cashier' %}active{% endif %}" onclick="closeSidebar()"><span class="nav-icon">🔑</span> <span data-t="nav.reset">Reset Access</span></a>
+      <a href="/admin/" class="nav-item" target="_blank"><span class="nav-icon">◇</span> <span data-t="nav.admin">Admin Panel</span></a>
+
+      {# ── Platform Superadmin — only visible to staff or admin with no store ── #}
+      {% if request.user.is_staff or request.user.profile.role == 'admin' and not request.user.profile.store %}
+      <a href="{% url 'superadmin_dashboard' %}" class="nav-item superadmin-link {% if 'superadmin' in request.resolver_match.url_name %}active{% endif %}" onclick="closeSidebar()">
+        <span class="nav-icon">🛡</span>
+        <span data-t="nav.superadmin">Platform Admin</span>
+      </a>
+      {% endif %}
+
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <div class="user-chip">
+      <div class="user-avatar">{{ request.user.username|first|upper }}</div>
+      <div>
+        <div class="user-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+        <div class="user-role">{% if request.user.profile %}{{ request.user.profile.role|title }}{% else %}User{% endif %}</div>
+      </div>
+    </div>
+    <a href="{% url 'logout' %}" style="display:block;margin-top:12px;font-size:12px;color:var(--muted);">↪ <span data-t="nav.signout">Sign out</span></a>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+      <div class="topbar-title">{% block page_title %}Dashboard{% endblock %}</div>
+    </div>
+    <div class="topbar-actions">
+      <div class="lang-toggle" title="Switch Language / زبان تبدیل کریں">
+        <div class="lang-opt active" data-lang="en" onclick="switchLang('en')">EN</div>
+        <div class="lang-opt ur" data-lang="ur" onclick="switchLang('ur')">اردو</div>
+      </div>
+      {% block topbar_actions %}{% endblock %}
+    </div>
+  </div>
+
+  {% if messages %}
+  <div class="messages">
+    {% for msg in messages %}
+    <div class="msg msg-{% if msg.tags == 'error' %}error{% elif msg.tags == 'success' %}success{% else %}warning{% endif %}">{{ msg }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="content">{% block content %}{% endblock %}</div>
+</div>
+
+<script>
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('show');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('show');
+}
+document.addEventListener('DOMContentLoaded', () => applyLang(getLang()));
+</script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

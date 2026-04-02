@@ -1,0 +1,32 @@
+{% extends "pos/base.html" %}
+{% block title %}Users — SmartPOS{% endblock %}
+{% block page_title %}User Management{% endblock %}
+{% block topbar_actions %}<a href="{% url 'user_add' %}" class="btn btn-primary btn-sm">⊕ Add User</a>{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Store</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td><code style="font-family:'DM Mono',monospace;color:var(--accent);">{{ u.username }}</code></td>
+          <td>{{ u.get_full_name|default:"—" }}</td>
+          <td>
+            {% if u.profile %}
+            <span class="badge {% if u.profile.role == 'admin' %}badge-red{% elif u.profile.role == 'manager' %}badge-blue{% else %}badge-gray{% endif %}">
+              {{ u.profile.role|title }}
+            </span>
+            {% else %}<span class="badge badge-gray">—</span>{% endif %}
+          </td>
+          <td>{% if u.profile %}{{ u.profile.store.name|default:"All Stores" }}{% else %}—{% endif %}</td>
+          <td><span class="badge {% if u.is_active %}badge-green{% else %}badge-red{% endif %}">{% if u.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:32px;">No users found</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

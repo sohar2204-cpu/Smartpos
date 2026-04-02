@@ -1,0 +1,70 @@
+{% extends "pos/base.html" %}
+{% block title %}Analytics — SmartPOS{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+
+{% block topbar_actions %}
+<form method="get" style="display:flex;gap:8px;">
+  <select name="period" onchange="this.form.submit()" style="width:150px;">
+    <option value="7" {% if period == '7' %}selected{% endif %}>Last 7 days</option>
+    <option value="30" {% if period == '30' %}selected{% endif %}>Last 30 days</option>
+    <option value="90" {% if period == '90' %}selected{% endif %}>Last 90 days</option>
+  </select>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card accent">
+    <div class="stat-label">Total Revenue</div>
+    <div class="stat-value">Rs {{ total_revenue|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Transactions</div>
+    <div class="stat-value">{{ total_transactions }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Avg. Transaction</div>
+    <div class="stat-value">Rs {{ avg_transaction|floatformat:2 }}</div>
+  </div>
+</div>
+
+
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">Top Selling Products</div>
+    {% for p in top_products %}
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:13.5px;font-weight:500;">{{ p.product_name }}</span>
+        <span style="font-size:12px;color:var(--muted);">{{ p.units }} units · Rs {{ p.revenue|floatformat:2 }}</span>
+      </div>
+      <div style="background:var(--surface2);border-radius:4px;height:6px;">
+        <div style="background:var(--accent);height:6px;border-radius:4px;width:{% widthratio p.units top_products.0.units 100 %}%;"></div>
+      </div>
+    </div>
+    {% empty %}
+    <div style="color:var(--muted);text-align:center;padding:20px 0;font-size:13px;">No data available</div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Revenue by Category</div>
+    {% for c in cat_sales_list %}
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:13.5px;font-weight:500;">{{ c.name }}</span>
+        <span style="font-size:12px;color:var(--muted);">Rs {{ c.value|floatformat:2 }}</span>
+      </div>
+      <div style="background:var(--surface2);border-radius:4px;height:6px;">
+        <div style="background:var(--accent2);height:6px;border-radius:4px;width:{{ c.pct }}%;"></div>
+      </div>
+    </div>
+    {% empty %}
+    <div style="color:var(--muted);text-align:center;padding:20px 0;font-size:13px;">No data available</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}{% endblock %}

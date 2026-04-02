@@ -1,0 +1,92 @@
+{% extends "pos/base.html" %}
+{% block title %}Reorder Alerts — SmartPOS{% endblock %}
+{% block page_title %}Inventory Reorder Alerts{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'products' %}" class="btn btn-ghost btn-sm">Manage Products</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="stats-grid" style="margin-bottom:20px;">
+  <div class="stat-card danger">
+    <div class="stat-label">Total Alerts</div>
+    <div class="stat-value">{{ total_alerts }}</div>
+  </div>
+  <div class="stat-card danger">
+    <div class="stat-label">Out of Stock</div>
+    <div class="stat-value">{{ out_of_stock|length }}</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="stat-label">Low Stock</div>
+    <div class="stat-value">{{ low_stock|length }}</div>
+  </div>
+</div>
+
+{% if out_of_stock %}
+<div class="card" style="margin-bottom:20px;border-color:rgba(255,95,109,.3);">
+  <div class="card-title" style="color:var(--danger);">🔴 Out of Stock — Order Immediately</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Product</th><th>Barcode</th><th>Category</th><th>Supplier</th><th>Reorder Qty</th><th>Cost Price</th><th>Selling Price</th></tr>
+      </thead>
+      <tbody>
+        {% for p in out_of_stock %}
+        <tr>
+          <td style="font-weight:500;">{{ p.name }}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:12px;">{{ p.barcode }}</td>
+          <td>{{ p.category.name|default:"—" }}</td>
+          <td style="color:var(--accent);">{{ p.supplier.name|default:"—" }}</td>
+          <td style="font-weight:600;color:var(--accent);">{{ p.reorder_quantity|default:"—" }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ p.cost_price|floatformat:2 }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ p.price|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if low_stock %}
+<div class="card" style="border-color:rgba(245,166,35,.3);">
+  <div class="card-title" style="color:var(--warn);">🟡 Low Stock — Order Soon</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Product</th><th>Barcode</th><th>Current Stock</th><th>Threshold</th><th>Supplier</th><th>Reorder Qty</th><th>Selling Price</th></tr>
+      </thead>
+      <tbody>
+        {% for p in low_stock %}
+        <tr>
+          <td style="font-weight:500;">{{ p.name }}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:12px;">{{ p.barcode }}</td>
+          <td>
+            <span style="font-family:'DM Mono',monospace;font-weight:600;color:var(--warn);">{{ p.stock_quantity }}</span>
+            <span style="font-size:11px;color:var(--muted);"> units</span>
+          </td>
+          <td style="color:var(--muted);">{{ p.low_stock_threshold }}</td>
+          <td style="color:var(--accent);">{{ p.supplier.name|default:"—" }}</td>
+          <td style="font-weight:600;color:var(--accent);">{{ p.reorder_quantity|default:"—" }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ p.price|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if not out_of_stock and not low_stock %}
+<div class="card" style="text-align:center;padding:60px 20px;">
+  <div style="font-size:48px;opacity:.2;margin-bottom:16px;">✓</div>
+  <div style="font-size:16px;font-weight:600;margin-bottom:8px;">All stock levels are healthy!</div>
+  <div style="font-size:13px;color:var(--muted);">No products need to be reordered right now.</div>
+</div>
+{% endif %}
+
+<div style="margin-top:16px;padding:12px 16px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted);border:1px solid var(--border);">
+  💡 Set <strong>Reorder Quantity</strong> and <strong>Supplier</strong> on each product to get better reorder suggestions. Edit products from the <a href="{% url 'products' %}" style="color:var(--accent);">Products page</a>.
+</div>
+{% endblock %}

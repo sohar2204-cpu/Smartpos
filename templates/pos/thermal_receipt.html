@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Receipt #{{ sale.sale_number }}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  width: 80mm;
+  max-width: 80mm;
+  margin: 0 auto;
+  padding: 4mm;
+  background: white;
+  color: #000;
+}
+.center { text-align: center; }
+.right { text-align: right; }
+.bold { font-weight: bold; }
+.store-name { font-size: 16px; font-weight: bold; text-align: center; margin-bottom: 2px; }
+.store-info { font-size: 10px; text-align: center; color: #333; margin-bottom: 2px; }
+.divider { border-top: 1px dashed #000; margin: 6px 0; }
+.divider-solid { border-top: 1px solid #000; margin: 6px 0; }
+.row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+.item-name { flex: 1; }
+.item-qty { width: 30px; text-align: center; }
+.item-price { width: 60px; text-align: right; }
+.total-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
+.grand-total { font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; }
+.footer { text-align: center; font-size: 10px; color: #333; margin-top: 4px; }
+.badge { display: inline-block; border: 1px solid #000; padding: 1px 6px; font-size: 10px; }
+
+@media print {
+  @page { margin: 0; size: 80mm auto; }
+  body { padding: 2mm; }
+  .no-print { display: none !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- No-print controls -->
+<div class="no-print" style="margin-bottom:12px;display:flex;gap:8px;">
+  <button onclick="window.print()" style="padding:8px 16px;background:#000;color:#fff;border:none;cursor:pointer;font-size:13px;border-radius:4px;">🖨 Print</button>
+  <button onclick="window.close()" style="padding:8px 16px;background:#eee;border:none;cursor:pointer;font-size:13px;border-radius:4px;">Close</button>
+</div>
+
+{% if settings and settings.logo %}
+<div class="center" style="margin-bottom:4px;">
+  <img src="{{ settings.logo.url }}" style="max-height:40px;">
+</div>
+{% endif %}
+
+<div class="store-name">{% if sale.store %}{{ sale.store.name }}{% else %}SmartPOS{% endif %}</div>
+
+{% if settings and settings.receipt_header %}
+<div class="store-info">{{ settings.receipt_header }}</div>
+{% endif %}
+{% if sale.store %}
+{% if sale.store.phone %}<div class="store-info">Tel: {{ sale.store.phone }}</div>{% endif %}
+{% if sale.store.address %}<div class="store-info">{{ sale.store.address }}</div>{% endif %}
+{% endif %}
+
+<div class="divider"></div>
+
+<div class="row"><span>Receipt #:</span><span class="bold">{{ sale.sale_number }}</span></div>
+<div class="row"><span>Date:</span><span>{{ sale.created_at|date:"d/m/Y H:i" }}</span></div>
+{% if settings and settings.show_cashier_on_receipt %}
+<div class="row"><span>Cashier:</span><span>{{ sale.cashier.get_full_name|default:sale.cashier.username }}</span></div>
+{% endif %}
+{% if sale.customer and settings and settings.show_customer_on_receipt %}
+<div class="row"><span>Customer:</span><span>{{ sale.customer.name }}</span></div>
+{% endif %}
+
+<div class="divider"></div>
+
+<div class="row bold">
+  <span class="item-name">Item</span>
+  <span class="item-qty">Qty</span>
+  <span class="item-price">Amount</span>
+</div>
+<div class="divider"></div>
+
+{% for item in sale.items.all %}
+<div style="margin-bottom:3px;">
+  <div class="item-name">{{ item.product_name }}</div>
+  <div class="row" style="color:#333;">
+    <span>  Rs {{ item.unit_price }} × {{ item.quantity }}</span>
+    <span class="bold">Rs {{ item.total_price }}</span>
+  </div>
+</div>
+{% endfor %}
+
+<div class="divider"></div>
+
+<div class="total-row"><span>Subtotal:</span><span>Rs {{ sale.subtotal }}</span></div>
+{% if sale.discount_amount > 0 %}
+<div class="total-row"><span>Discount:</span><span>- Rs {{ sale.discount_amount }}</span></div>
+{% endif %}
+{% if sale.loyalty_points_used > 0 %}
+<div class="total-row"><span>Points Used ({{ sale.loyalty_points_used }} pts):</span><span>- Rs {% widthratio sale.loyalty_points_used 2 1 %}.00</span></div>
+{% endif %}
+{% if sale.tax_amount > 0 %}
+<div class="total-row"><span>Tax:</span><span>Rs {{ sale.tax_amount }}</span></div>
+{% endif %}
+
+<div class="divider-solid"></div>
+<div class="grand-total"><span>TOTAL:</span><span>Rs {{ sale.total_amount }}</span></div>
+<div class="divider-solid"></div>
+
+<div class="total-row"><span>Payment:</span><span class="bold">{{ sale.get_payment_method_display }}</span></div>
+{% if sale.payment_method == 'cash' %}
+<div class="total-row"><span>Received:</span><span>Rs {{ sale.amount_received }}</span></div>
+<div class="total-row"><span>Change:</span><span>Rs {{ sale.change_amount }}</span></div>
+{% endif %}
+
+{% if sale.loyalty_points_earned > 0 %}
+<div class="divider"></div>
+<div class="center">⭐ You earned {{ sale.loyalty_points_earned }} loyalty points!</div>
+{% if sale.customer %}
+<div class="center">Total points: {{ sale.customer.loyalty_points }}</div>
+{% endif %}
+{% endif %}
+
+<div class="divider"></div>
+
+<div class="footer">
+  {% if settings and settings.receipt_footer %}
+  {{ settings.receipt_footer }}
+  {% else %}
+  Thank you for shopping with us!
+  {% endif %}
+</div>
+<div class="footer" style="margin-top:4px;">Powered by SmartPOS</div>
+
+<br><br>
+
+</body>
+</html>

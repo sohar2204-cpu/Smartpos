@@ -1,0 +1,154 @@
+{% extends 'pos/base.html' %}
+{% block title %}Tax Engine{% endblock %}
+{% block content %}
+<style>
+  .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
+  .tax-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-bottom:28px;}
+  .tax-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+  .tax-card-top{padding:16px;border-left:4px solid var(--accent);}
+  .tax-card.inactive{opacity:.55;border-left-color:var(--border);}
+  .tax-card-top .name{font-weight:700;font-size:15px;}
+  .tax-card-top .rate{font-size:26px;font-weight:800;color:var(--accent);margin:4px 0;}
+  .tax-card-top .meta{font-size:12px;color:var(--muted);}
+  .tax-card-actions{display:flex;gap:8px;padding:10px 16px;background:var(--surface2);border-top:1px solid var(--border);}
+  .badge-mode{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge-excl{background:rgba(79,156,255,.15);color:#4f9cff;}
+  .badge-incl{background:rgba(16,185,129,.15);color:#10b981;}
+  .badge-type{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;background:var(--surface2);color:var(--muted);margin-left:4px;}
+  .add-form{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+  .form-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:14px;}
+  .info-box{background:rgba(79,156,255,.08);border:1px solid rgba(79,156,255,.2);border-radius:var(--radius);padding:14px 16px;margin-bottom:20px;font-size:13px;color:var(--text);}
+  .empty-state{text-align:center;padding:50px 20px;color:var(--muted);}
+</style>
+
+<div class="page-header">
+  <div>
+    <div style="font-size:22px;font-weight:700;">⚙️ Tax Engine</div>
+    <div style="color:var(--muted);font-size:13px;margin-top:2px;">Define VAT, GST, Sales Tax rules — applied automatically at checkout</div>
+  </div>
+</div>
+
+<div class="info-box">
+  💡 <strong>How it works:</strong> Add one or more tax rules below. At checkout, the system automatically applies the correct tax based on the product category. You can mix VAT + Excise, or apply different rates to different categories.
+  <br><br>
+  <strong>Exclusive</strong> = Tax added on top of price (e.g. Rs 100 + 17% = Rs 117 total)<br>
+  <strong>Inclusive</strong> = Tax already included in price (e.g. Rs 117 price includes 17% VAT)
+  {% if store_tax_rate > 0 %}
+  <br><br>⚠️ Your store also has a legacy tax rate of <strong>{{ store_tax_rate }}%</strong>. This is only used as fallback when no Tax Rules are defined.
+  {% endif %}
+</div>
+
+<!-- Existing Rules -->
+{% if rules %}
+<div class="tax-grid">
+  {% for rule in rules %}
+  <div class="tax-card {% if not rule.is_active %}inactive{% endif %}">
+    <div class="tax-card-top" style="border-left-color:{% if rule.is_active %}var(--accent){% else %}var(--border){% endif %}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div class="name">{{ rule.name }}</div>
+        <span class="badge-type">{{ rule.get_tax_type_display }}</span>
+      </div>
+      <div class="rate">{{ rule.rate }}%</div>
+      <div class="meta">
+        <span class="badge-mode {% if rule.tax_mode == 'exclusive' %}badge-excl{% else %}badge-incl{% endif %}">
+          {{ rule.get_tax_mode_display }}
+        </span>
+        &nbsp;
+        {% if rule.apply_to == 'all' %}
+          Applied to all products
+        {% else %}
+          Applied to: <strong>{{ rule.category.name|default:"—" }}</strong>
+        {% endif %}
+      </div>
+      {% if not rule.is_active %}
+      <div style="margin-top:6px;font-size:11px;color:var(--danger);">● Disabled</div>
+      {% endif %}
+    </div>
+    <div class="tax-card-actions">
+      <form method="post" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="toggle">
+        <input type="hidden" name="rule_id" value="{{ rule.id }}">
+        <button class="btn" style="font-size:12px;padding:5px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:5px;cursor:pointer;">
+          {% if rule.is_active %}⏸ Disable{% else %}▶ Enable{% endif %}
+        </button>
+      </form>
+      <form method="post" style="display:inline;" onsubmit="return confirm('Delete this tax rule?')">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="rule_id" value="{{ rule.id }}">
+        <button class="btn btn-danger" style="font-size:12px;padding:5px 12px;">🗑 Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <div style="font-size:40px;opacity:.3;margin-bottom:10px;">🧾</div>
+  <div>No tax rules defined yet</div>
+  <div style="font-size:12px;margin-top:6px;">Add your first rule below</div>
+</div>
+{% endif %}
+
+<!-- Add New Rule Form -->
+<div class="add-form">
+  <div style="font-size:16px;font-weight:700;margin-bottom:16px;">➕ Add New Tax Rule</div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <div class="form-row">
+      <div>
+        <label class="form-label">Rule Name *</label>
+        <input type="text" name="name" class="form-control" placeholder='e.g. "Standard VAT"' required>
+      </div>
+      <div>
+        <label class="form-label">Tax Type *</label>
+        <select name="tax_type" class="form-control">
+          {% for val,label in tax_type_choices %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Rate (%) *</label>
+        <input type="number" name="rate" class="form-control" placeholder="e.g. 17.000" step="0.001" min="0" max="100" required>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label class="form-label">Tax Mode *</label>
+        <select name="tax_mode" class="form-control">
+          {% for val,label in apply_choices %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Apply To *</label>
+        <select name="apply_to" class="form-control" onchange="toggleCategory(this.value)">
+          {% for val,label in apply_to_choices %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="categoryField" style="display:none;">
+        <label class="form-label">Category</label>
+        <select name="category" class="form-control">
+          <option value="">— Select Category —</option>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Tax Rule</button>
+  </form>
+</div>
+
+<script>
+function toggleCategory(val) {
+  document.getElementById('categoryField').style.display = val === 'category' ? 'block' : 'none';
+}
+</script>
+{% endblock %}

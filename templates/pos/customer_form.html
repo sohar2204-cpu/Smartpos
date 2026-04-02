@@ -1,0 +1,21 @@
+{% extends "pos/base.html" %}
+{% block title %}{{ action }} Customer — SmartPOS{% endblock %}
+{% block page_title %}{{ action }} Customer{% endblock %}
+{% block content %}
+<div style="max-width:500px;">
+  <form method="post">
+    {% csrf_token %}
+    <div class="card">
+      <div class="card-title">Customer Details</div>
+      <div class="form-group"><label>Name *</label><input type="text" name="name" value="{{ customer.name|default:'' }}" required></div>
+      <div class="form-group"><label>Phone</label><input type="text" name="phone" value="{{ customer.phone|default:'' }}"></div>
+      <div class="form-group"><label>Email</label><input type="email" name="email" value="{{ customer.email|default:'' }}"></div>
+      <div class="form-group"><label>Address</label><textarea name="address" rows="3">{{ customer.address|default:'' }}</textarea></div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn btn-primary">{{ action }} Customer</button>
+        <a href="{% url 'customers' %}" class="btn btn-ghost">Cancel</a>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}

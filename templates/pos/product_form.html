@@ -1,0 +1,79 @@
+{% extends "pos/base.html" %}
+{% block title %}{{ action }} Product — SmartPOS{% endblock %}
+{% block page_title %}{{ action }} Product{% endblock %}
+
+{% block content %}
+<div style="max-width:700px;">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">Product Information</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Product Name *</label>
+          <input type="text" name="name" value="{{ product.name|default:'' }}" required placeholder="e.g. Whole Milk 1L">
+        </div>
+        <div class="form-group">
+          <label>Barcode *</label>
+          <input type="text" name="barcode" value="{{ product.barcode|default:'' }}" required placeholder="e.g. 8901234567890">
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <select name="category">
+            <option value="">Select category</option>
+            {% for c in categories %}
+            <option value="{{ c.id }}" {% if product.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Supplier</label>
+          <select name="supplier">
+            <option value="">Select supplier</option>
+            {% for s in suppliers %}
+            <option value="{{ s.id }}" {% if product.supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">Pricing & Stock</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Selling Price *</label>
+          <input type="number" name="price" value="{{ product.price|default:'' }}" step="0.01" required placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label>Cost Price</label>
+          <input type="number" name="cost_price" value="{{ product.cost_price|default:'' }}" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label>Stock Quantity</label>
+          <input type="number" name="stock_quantity" value="{{ product.stock_quantity|default:'0' }}" min="0">
+        </div>
+        <div class="form-group">
+          <label>Low Stock Threshold</label>
+          <input type="number" name="low_stock_threshold" value="{{ product.low_stock_threshold|default:'10' }}" min="0">
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">Product Image (Optional)</div>
+      <div class="form-group">
+        <input type="file" name="image" accept="image/*">
+        {% if product.image %}
+        <div style="margin-top:8px;font-size:12px;color:var(--muted);">Current: {{ product.image.name }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;">
+      <button type="submit" class="btn btn-primary">{{ action }} Product</button>
+      <a href="{% url 'products' %}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

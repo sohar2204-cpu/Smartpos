@@ -1,0 +1,69 @@
+{% extends "pos/base.html" %}
+
+{% block title %}Categories{% endblock %}
+{% block page_title %}Categories{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'category_add' %}" class="btn btn-primary">+ Add Category</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="card">
+
+  <div class="card-title">All Categories</div>
+
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search categories...">
+  </div>
+
+  <div class="table-wrap">
+    <table id="categoryTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th>Products</th>
+          <th>Created</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cat in categories %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>{{ cat.name }}</td>
+          <td>{{ cat.product_set.count }}</td>
+          <td>{{ cat.created_at|date:"d M Y" }}</td>
+          <td style="text-align:right;">
+            <a href="{% url 'category_edit' cat.id %}" class="btn btn-sm btn-ghost">Edit</a>
+            <a href="{% url 'category_delete' cat.id %}" class="btn btn-sm btn-danger">Delete</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">
+            No categories yet
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById("searchInput").addEventListener("keyup", function(){
+  let value = this.value.toLowerCase();
+  let rows = document.querySelectorAll("#categoryTable tbody tr");
+
+  rows.forEach(row => {
+    row.style.display = row.innerText.toLowerCase().includes(value) ? "" : "none";
+  });
+});
+</script>
+{% endblock %}

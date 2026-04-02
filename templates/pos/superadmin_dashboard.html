@@ -1,0 +1,331 @@
+{% extends "pos/base.html" %}
+{% block title %}Platform Admin — SmartPOS{% endblock %}
+{% block page_title %}Platform Admin{% endblock %}
+
+{% block extra_css %}
+<style>
+/* ── Hero ────────────────────────────────────────────────────────────── */
+.sa-hero{
+  background:linear-gradient(135deg,#1a1a2e 0%,#16213e 60%,#0f3460 100%);
+  border:1px solid var(--border);
+  border-radius:var(--radius);padding:24px 28px;margin-bottom:24px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sa-hero h1{font-size:18px;font-weight:600;color:var(--text);margin:0 0 4px;}
+.sa-hero p{margin:0;color:var(--muted);font-size:13px;}
+.sa-badge{
+  background:linear-gradient(135deg,#4f9cff,#7c3aed);
+  padding:6px 16px;border-radius:20px;
+  font-size:11px;font-weight:700;letter-spacing:.8px;
+  text-transform:uppercase;color:#fff;white-space:nowrap;
+}
+
+/* ── KPI cards ───────────────────────────────────────────────────────── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;}
+.kpi-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:20px;
+}
+.kpi-icon{font-size:22px;margin-bottom:8px;}
+.kpi-label{font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;}
+.kpi-value{font-size:26px;font-weight:700;color:var(--text);font-family:'DM Mono',monospace;line-height:1;}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+.kpi-sub.up{color:var(--accent2);}
+
+/* ── Filter bar ──────────────────────────────────────────────────────── */
+.filter-bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+.filter-bar input,.filter-bar select{
+  height:36px;padding:0 12px;
+  border:1px solid var(--border);border-radius:7px;
+  font-size:13px;background:var(--surface2);
+  color:var(--text);outline:none;
+}
+.filter-bar input{flex:1;min-width:200px;}
+.filter-bar input:focus,.filter-bar select:focus{border-color:var(--accent);}
+.filter-bar select option{background:var(--surface2);}
+
+/* ── Store table ─────────────────────────────────────────────────────── */
+.store-name-cell{display:flex;align-items:center;gap:10px;}
+.store-avatar{
+  width:32px;height:32px;border-radius:8px;flex-shrink:0;
+  background:linear-gradient(135deg,#4f9cff,#7c3aed);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:700;font-size:13px;
+}
+.store-name{font-weight:500;color:var(--text);font-size:13.5px;}
+.store-owner{font-size:11px;color:var(--muted);}
+
+/* ── Pills ───────────────────────────────────────────────────────────── */
+.pill{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;
+}
+.pill.active   {background:rgba(56,226,184,.12);color:var(--accent2);border:1px solid rgba(56,226,184,.25);}
+.pill.trial    {background:rgba(79,156,255,.12); color:var(--accent); border:1px solid rgba(79,156,255,.25);}
+.pill.suspended{background:rgba(255,95,109,.12); color:var(--danger); border:1px solid rgba(255,95,109,.25);}
+.pill.inactive {background:rgba(122,132,160,.12);color:var(--muted);  border:1px solid rgba(122,132,160,.2);}
+
+.plan-pill{
+  padding:2px 9px;border-radius:5px;
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+}
+.plan-pill.starter   {background:rgba(79,156,255,.15); color:var(--accent);}
+.plan-pill.pro       {background:rgba(167,139,250,.15);color:#a78bfa;}
+.plan-pill.enterprise{background:rgba(245,166,35,.15); color:var(--warn);}
+
+/* ── Action buttons ──────────────────────────────────────────────────── */
+.act-btn{
+  padding:4px 10px;border-radius:6px;
+  border:1px solid var(--border);background:var(--surface2);
+  font-size:11px;font-weight:600;cursor:pointer;
+  transition:all .15s;text-decoration:none;
+  color:var(--muted);display:inline-block;
+}
+.act-btn:hover{border-color:var(--accent);color:var(--accent);}
+.act-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+.act-btn.success{
+  background:rgba(56,226,184,.1);
+  border-color:rgba(56,226,184,.3);
+  color:var(--accent2);
+}
+.act-btn.success:hover{background:rgba(56,226,184,.2);}
+
+/* ── Bottom row ──────────────────────────────────────────────────────── */
+.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;}
+.mini-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+.mini-card h4{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:14px;}
+.mini-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 0;border-bottom:1px solid var(--border);
+}
+.mini-row:last-child{border-bottom:none;}
+.mini-store-name{font-size:13px;font-weight:500;color:var(--text);}
+.mini-store-sub{font-size:11px;color:var(--muted);}
+
+/* ── Modal ───────────────────────────────────────────────────────────── */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.6);
+  display:none;align-items:center;justify-content:center;z-index:1000;
+}
+.modal-backdrop.open{display:flex;}
+.modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:28px;
+  width:440px;max-width:95vw;
+  box-shadow:0 24px 64px rgba(0,0,0,.5);
+}
+.modal h3{font-size:16px;font-weight:600;color:var(--text);margin:0 0 6px;}
+.modal p{font-size:13px;color:var(--muted);margin:0 0 20px;line-height:1.6;}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+.modal-actions button{
+  padding:9px 18px;border-radius:7px;border:none;
+  font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;
+}
+.modal-cancel{background:var(--surface2);color:var(--text);border:1px solid var(--border);}
+.modal-confirm{background:var(--danger);color:#fff;}
+.modal-confirm.safe{background:var(--accent2);color:#0d0f12;}
+
+@media(max-width:900px){
+  .kpi-grid{grid-template-columns:1fr 1fr;}
+  .bottom-grid{grid-template-columns:1fr;}
+}
+@media(max-width:500px){
+  .kpi-grid{grid-template-columns:1fr 1fr;}
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<div class="sa-hero">
+  <div>
+    <h1>🛡 Platform Admin</h1>
+    <p>Manage all stores, tenants, and platform health</p>
+  </div>
+  <span class="sa-badge">Superadmin</span>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-icon">🏪</div>
+    <div class="kpi-label">Total Stores</div>
+    <div class="kpi-value">{{ total_stores }}</div>
+    <div class="kpi-sub up">+{{ new_stores_week }} this week</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">👤</div>
+    <div class="kpi-label">Total Users</div>
+    <div class="kpi-value">{{ total_users }}</div>
+    <div class="kpi-sub">across all stores</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">📦</div>
+    <div class="kpi-label">Sales Today</div>
+    <div class="kpi-value">{{ total_sales_today }}</div>
+    <div class="kpi-sub">all stores combined</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">💰</div>
+    <div class="kpi-label">Revenue Today</div>
+    <div class="kpi-value">Rs {{ platform_revenue_today|floatformat:0 }}</div>
+    <div class="kpi-sub">all stores combined</div>
+  </div>
+</div>
+
+<!-- Stores Table -->
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div class="card-title" style="margin:0;">All Stores</div>
+    <a href="{% url 'superadmin_add_store' %}" class="btn btn-primary btn-sm">+ Add Store</a>
+  </div>
+
+  <div class="filter-bar">
+    <input type="text" id="storeSearch" placeholder="Search store or owner…" oninput="filterStores()">
+    <select id="statusFilter" onchange="filterStores()">
+      <option value="">All statuses</option>
+      <option value="active">Active</option>
+      <option value="trial">Trial</option>
+      <option value="suspended">Suspended</option>
+    </select>
+    <select id="planFilter" onchange="filterStores()">
+      <option value="">All plans</option>
+      <option value="starter">Starter</option>
+      <option value="pro">Pro</option>
+      <option value="enterprise">Enterprise</option>
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table id="storesTable">
+      <thead>
+        <tr>
+          <th>Store</th>
+          <th>Plan</th>
+          <th>Status</th>
+          <th>Users</th>
+          <th>Sales (30d)</th>
+          <th>Revenue (30d)</th>
+          <th>Joined</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in stores %}
+        <tr data-name="{{ s.name|lower }}" data-owner="{{ s.owner_username|lower }}"
+            data-status="{{ s.status }}" data-plan="{{ s.plan }}">
+          <td>
+            <div class="store-name-cell">
+              <div class="store-avatar">{{ s.name|first|upper }}</div>
+              <div>
+                <div class="store-name">{{ s.name }}</div>
+                <div class="store-owner">{{ s.owner_username }}</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="plan-pill {{ s.plan }}">{{ s.plan|title }}</span></td>
+          <td><span class="pill {{ s.status }}">● {{ s.status|title }}</span></td>
+          <td style="font-family:'DM Mono',monospace;">{{ s.user_count }}</td>
+          <td style="font-family:'DM Mono',monospace;">{{ s.sales_30d }}</td>
+          <td style="font-family:'DM Mono',monospace;">Rs {{ s.revenue_30d|floatformat:0 }}</td>
+          <td style="color:var(--muted);font-size:12px;">{{ s.created_at|date:"d M Y" }}</td>
+          <td style="white-space:nowrap;">
+            <a href="{% url 'superadmin_login_as' s.id %}" class="act-btn" title="Login as store admin">👤</a>
+            {% if s.status == 'suspended' %}
+              <a href="{% url 'superadmin_activate_store' s.id %}" class="act-btn success">Activate</a>
+            {% else %}
+              <button class="act-btn danger" onclick="confirmSuspend({{ s.id }}, '{{ s.name }}')">Suspend</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8" style="text-align:center;color:var(--muted);padding:40px;">
+            No stores yet.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Bottom row -->
+<div class="bottom-grid">
+  <div class="mini-card">
+    <h4>🆕 Recent Signups</h4>
+    {% for s in recent_signups %}
+    <div class="mini-row">
+      <div>
+        <div class="mini-store-name">{{ s.name }}</div>
+        <div class="mini-store-sub">{{ s.owner_username }} · {{ s.created_at|date:"d M" }}</div>
+      </div>
+      <span class="plan-pill {{ s.plan }}">{{ s.plan|title }}</span>
+    </div>
+    {% empty %}
+    <p style="color:var(--muted);font-size:13px;margin:0;">No signups yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="mini-card">
+    <h4>⚠️ Suspended Stores</h4>
+    {% for s in suspended_stores %}
+    <div class="mini-row">
+      <div>
+        <div class="mini-store-name">{{ s.name }}</div>
+        <div class="mini-store-sub">{{ s.owner_username }}</div>
+      </div>
+      <a href="{% url 'superadmin_activate_store' s.id %}" class="act-btn success">Activate</a>
+    </div>
+    {% empty %}
+    <p style="color:var(--accent2);font-size:13px;margin:0;">No suspended stores ✓</p>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Suspend Modal -->
+<div class="modal-backdrop" id="suspendModal">
+  <div class="modal">
+    <h3>Suspend Store</h3>
+    <p id="suspendMsg">Are you sure? All users of this store will lose access immediately.</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <form method="post" id="suspendForm" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="suspend">
+        <button type="submit" class="modal-confirm">Suspend Store</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function filterStores() {
+  const q      = document.getElementById('storeSearch').value.toLowerCase();
+  const status = document.getElementById('statusFilter').value;
+  const plan   = document.getElementById('planFilter').value;
+  document.querySelectorAll('#storesTable tbody tr').forEach(row => {
+    const matchQ = !q      || (row.dataset.name||'').includes(q) || (row.dataset.owner||'').includes(q);
+    const matchS = !status || row.dataset.status === status;
+    const matchP = !plan   || row.dataset.plan   === plan;
+    row.style.display = (matchQ && matchS && matchP) ? '' : 'none';
+  });
+}
+function confirmSuspend(id, name) {
+  document.getElementById('suspendMsg').textContent =
+    `Are you sure you want to suspend "${name}"? All users will lose access immediately.`;
+  document.getElementById('suspendForm').action = `/superadmin/stores/${id}/suspend/`;
+  document.getElementById('suspendModal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('suspendModal').classList.remove('open');
+}
+document.getElementById('suspendModal').addEventListener('click', function(e){
+  if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}

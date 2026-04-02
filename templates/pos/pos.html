@@ -1,0 +1,634 @@
+{% extends "pos/base.html" %}
+{% block title %}POS Terminal — SmartPOS{% endblock %}
+{% block page_title %}POS Terminal{% endblock %}
+
+{% block extra_css %}
+<style>
+.pos-layout{display:grid;grid-template-columns:1fr 380px;gap:16px;height:calc(100vh - 88px);}
+.pos-left{display:flex;flex-direction:column;gap:12px;overflow:hidden;min-height:0;}
+.pos-right{display:flex;flex-direction:column;gap:10px;overflow-y:auto;}
+.search-tabs{display:flex;gap:6px;margin-bottom:10px;}
+.search-tab{padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;}
+.search-tab.active{border-color:var(--accent);color:var(--accent);background:rgba(79,156,255,.1);}
+.search-wrap{position:relative;}
+.search-results{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;z-index:50;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+.search-result-item{padding:10px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(38,45,61,.4);transition:background .1s;}
+.search-result-item:last-child{border-bottom:none;}
+.search-result-item:hover{background:var(--surface2);}
+.search-result-name{font-size:13.5px;font-weight:500;}
+.search-result-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+.search-result-price{font-family:'DM Mono',monospace;font-size:13px;color:var(--accent);white-space:nowrap;margin-left:12px;}
+.cart-table{flex:1;overflow-y:auto;min-height:0;}
+.cart-empty{display:flex;align-items:center;justify-content:center;height:160px;color:var(--muted);font-size:13px;flex-direction:column;gap:8px;}
+.cart-empty .icon{font-size:36px;opacity:.3;}
+.cart-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
+.cart-item-name{flex:1;font-size:13px;font-weight:500;min-width:0;}
+.cart-item-sub{font-size:11px;color:var(--muted);margin-top:1px;}
+.qty-control{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+.qty-btn{width:24px;height:24px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);color:var(--text);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .1s;}
+.qty-btn:hover{border-color:var(--accent);color:var(--accent);}
+.qty-val{font-family:'DM Mono',monospace;font-size:12px;min-width:20px;text-align:center;}
+.item-total{font-family:'DM Mono',monospace;font-size:13px;font-weight:500;min-width:72px;text-align:right;flex-shrink:0;}
+.remove-btn{color:var(--danger);cursor:pointer;font-size:15px;opacity:.5;padding:3px;flex-shrink:0;}
+.remove-btn:hover{opacity:1;}
+.totals-block{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;}
+.total-row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;align-items:center;}
+.total-row.grand{font-size:17px;font-weight:600;font-family:'DM Mono',monospace;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);margin-bottom:0;}
+.total-row.discount-row{color:var(--danger);}
+.discount-block{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;}
+.discount-types{display:flex;gap:6px;margin-bottom:10px;}
+.disc-type{flex:1;padding:6px 4px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:500;cursor:pointer;text-align:center;transition:all .15s;font-family:'DM Sans',sans-serif;}
+.disc-type.active{border-color:var(--danger);color:var(--danger);background:rgba(255,95,109,.1);}
+.loyalty-block{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;}
+.loyalty-info{background:rgba(56,226,184,.07);border:1px solid rgba(56,226,184,.2);border-radius:7px;padding:10px 12px;font-size:12.5px;display:none;margin-top:10px;}
+.points-badge{display:inline-block;background:rgba(56,226,184,.15);color:var(--accent2);border-radius:99px;padding:2px 10px;font-size:12px;font-weight:600;font-family:'DM Mono',monospace;}
+.payment-section{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;}
+.pay-methods{display:flex;gap:6px;margin-bottom:10px;}
+.pay-method{flex:1;padding:7px 4px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:500;cursor:pointer;text-align:center;transition:all .15s;font-family:'DM Sans',sans-serif;}
+.pay-method.active{border-color:var(--accent);color:var(--accent);background:rgba(79,156,255,.1);}
+.checkout-btn{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .15s;}
+.checkout-btn:hover{background:#3a8cf0;}
+.checkout-btn:disabled{opacity:.4;cursor:not-allowed;}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;}
+.modal-overlay.show{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;max-width:380px;width:90%;text-align:center;}
+.modal-icon{font-size:44px;margin-bottom:12px;}
+.modal-title{font-size:19px;font-weight:600;margin-bottom:6px;}
+.modal-sub{color:var(--muted);font-size:13px;margin-bottom:16px;}
+.change-display{background:var(--surface2);border-radius:8px;padding:10px;margin-bottom:16px;font-family:'DM Mono',monospace;font-size:20px;font-weight:600;color:var(--accent2);}
+.points-earned-display{background:rgba(56,226,184,.1);border:1px solid rgba(56,226,184,.2);border-radius:8px;padding:8px;margin-bottom:16px;font-size:13px;color:var(--accent2);}
+.modal-actions{display:flex;gap:8px;}
+.modal-actions .btn{flex:1;justify-content:center;}
+/* RTL fixes for POS */
+body.lang-ur .pos-layout{direction:rtl;}
+body.lang-ur .total-row{flex-direction:row-reverse;}
+body.lang-ur .cart-item{flex-direction:row-reverse;}
+body.lang-ur .item-total{text-align:left;}
+body.lang-ur .search-result-item{flex-direction:row-reverse;}
+body.lang-ur .search-result-price{margin-left:0;margin-right:12px;}
+@media(max-width:900px){.pos-layout{grid-template-columns:1fr;}.pos-right{position:static;}}
+@media(max-width:768px){.pos-layout{height:auto;grid-template-columns:1fr;}.cart-table{max-height:260px;}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pos-layout">
+
+  <!-- LEFT: Search + Cart -->
+  <div class="pos-left">
+    <div class="card card-sm">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+        <span style="font-size:12px;color:var(--muted);flex-shrink:0;" data-t="pos.customer">Customer:</span>
+        <select id="customerSelect" style="flex:1;min-width:160px;" onchange="onCustomerChange(this.value)">
+          <option value="" data-t="pos.walkin">Walk-in Customer</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.name }}{% if c.phone %} ({{ c.phone }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="search-tabs">
+        <button class="search-tab active" id="tabBarcode" onclick="switchTab('barcode',this)" data-t="pos.barcode">⊞ Barcode</button>
+        <button class="search-tab" id="tabName" onclick="switchTab('name',this)" data-t="pos.searchname">⊙ Search by Name</button>
+      </div>
+      <div id="barcodePanel">
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="barcodeInput" data-tp="pos.scanbarcode" placeholder="Scan barcode or type code..." autofocus style="flex:1;font-family:'DM Mono',monospace;">
+          <button class="btn btn-primary btn-sm" onclick="lookupBarcode()" data-t="pos.scan">Scan</button>
+        </div>
+      </div>
+      <div id="namePanel" style="display:none;">
+        <div class="search-wrap">
+          <input type="text" id="nameSearch" data-tp="pos.typename" placeholder="Type product name..." oninput="searchByName(this.value)" autocomplete="off">
+          <div class="search-results" id="searchResults" style="display:none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cart -->
+    <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div class="card-title" style="margin-bottom:0;"><span data-t="pos.cart">Cart</span> <span id="cartCount" style="color:var(--accent);font-size:11px;"></span></div>
+        <button class="btn btn-ghost btn-xs" onclick="clearCart()" data-t="pos.clear">Clear</button>
+      </div>
+      <div class="cart-table">
+        <div class="cart-empty" id="cartEmpty">
+          <div class="icon">◫</div>
+          <div data-t="pos.cartempty">Cart is empty — scan or search a product</div>
+        </div>
+        <div id="cartItems"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Discount + Loyalty + Totals + Payment -->
+  <div class="pos-right">
+
+    <!-- Discount -->
+    <div class="discount-block">
+      <div class="card-title" style="margin-bottom:8px;" data-t="pos.discount">Discount</div>
+      <div class="discount-types">
+        <button class="disc-type active" data-type="none" onclick="setDiscountType(this)" data-t="pos.none">None</button>
+        <button class="disc-type" data-type="percent" onclick="setDiscountType(this)" data-t="pos.percentoff">% Off</button>
+        <button class="disc-type" data-type="fixed" onclick="setDiscountType(this)" data-t="pos.rsoff">Rs Off</button>
+      </div>
+      <div id="discountInput" style="display:none;">
+        <input type="number" id="discountValue" data-tp="pos.enteramt" placeholder="Enter amount..." min="0" step="0.01" oninput="updateTotals()">
+      </div>
+    </div>
+
+    <!-- Loyalty Points -->
+    <div class="loyalty-block">
+      <div class="card-title" style="margin-bottom:8px;" data-t="pos.loyaltypts">Loyalty Points</div>
+      <div id="noCustomerMsg" style="font-size:12px;color:var(--muted);" data-t="pos.selectcust">Select a customer to use loyalty points</div>
+      <div id="loyaltyPanel" style="display:none;">
+        <div id="loyaltyInfo" class="loyalty-info">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span><span data-t="pos.available">Available points:</span> <span class="points-badge" id="availablePoints">0</span></span>
+            <span style="color:var(--muted);font-size:11px;">= {{ currency_symbol|default:"Rs" }} <span id="pointsWorth">0.00</span></span>
+          </div>
+          <div style="margin-top:10px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;text-transform:none;color:var(--text);cursor:pointer;">
+              <input type="checkbox" id="usePointsToggle" onchange="toggleLoyaltyPoints()" style="width:auto;">
+              <span data-t="pos.redeem">Redeem points for this sale</span>
+            </label>
+            <div id="pointsInput" style="display:none;margin-top:8px;">
+              <input type="number" id="pointsToUse" data-tp="pos.ptsinput" placeholder="Points to use..." min="1" oninput="updateTotals()">
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;"><span data-t="pos.discount_lbl">Discount:</span> {{ currency_symbol|default:"Rs" }} <span id="pointsDiscount">0.00</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Totals -->
+    <div class="totals-block">
+      <div class="total-row"><span style="color:var(--muted);" data-t="pos.subtotal">Subtotal</span><span id="subtotal">{{ currency_symbol|default:"Rs" }} 0.00</span></div>
+      <div class="total-row discount-row" id="discountRow" style="display:none;"><span data-t="pos.disc_lbl">Discount</span><span id="discountDisplay">- {{ currency_symbol|default:"Rs" }} 0.00</span></div>
+      <div class="total-row discount-row" id="loyaltyRow" style="display:none;"><span data-t="pos.pts_disc">Points Discount</span><span id="loyaltyDisplay">- {{ currency_symbol|default:"Rs" }} 0.00</span></div>
+      <div class="total-row"><span style="color:var(--muted);" data-t="pos.tax">Tax</span><span id="taxDisplay">{{ currency_symbol|default:"Rs" }} 0.00</span></div>
+      <div class="total-row grand"><span data-t="pos.total">Total</span><span id="totalDisplay">{{ currency_symbol|default:"Rs" }} 0.00</span></div>
+    </div>
+
+    <!-- Payment -->
+    <div class="payment-section">
+      <div class="card-title" style="margin-bottom:8px;" data-t="pos.payment">Payment</div>
+      <div class="pay-methods">
+        <button class="pay-method active" data-method="cash" onclick="selectPayment(this)" data-t="pos.cash">💵 Cash</button>
+        <button class="pay-method" data-method="card" onclick="selectPayment(this)" data-t="pos.card">💳 Card</button>
+        <button class="pay-method" data-method="online" onclick="selectPayment(this)" data-t="pos.online">📱 Online</button>
+      </div>
+      <div id="cashFields">
+        <div class="form-group" style="margin-bottom:8px;">
+          <label data-t="pos.received">Amount Received</label>
+          <input type="number" id="amountReceived" placeholder="0.00" step="0.01" oninput="calcChange()">
+        </div>
+        <div class="total-row" style="margin:0;">
+          <span style="color:var(--muted);" data-t="pos.change">Change</span>
+          <span id="changeDisplay" style="color:var(--accent2);font-weight:600;">{{ currency_symbol|default:"Rs" }} 0.00</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="checkout-btn" id="checkoutBtn" onclick="processCheckout()" disabled data-t="pos.complete">Complete Sale →</button>
+  </div>
+</div>
+
+<!-- Success Modal -->
+<div class="modal-overlay" id="successModal">
+  <div class="modal">
+    <div class="modal-icon">✓</div>
+    <div class="modal-title" data-t="pos.salecomplete">Sale Complete!</div>
+    <div class="modal-sub" id="saleInfo"></div>
+    <div class="change-display" id="changeInfo"></div>
+    <div class="points-earned-display" id="pointsEarnedInfo" style="display:none;"></div>
+    <div id="fbrInfo" style="display:none;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:8px;padding:8px 14px;margin-bottom:16px;font-size:12px;color:var(--accent2);"></div>
+    <div class="modal-actions">
+      <a id="receiptLink" href="#" class="btn btn-ghost btn-sm" target="_blank" data-t="pos.receipt">🖨 Receipt</a>
+      <button class="btn btn-primary btn-sm" onclick="newSale()" data-t="pos.newsale">New Sale</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let cart = [];
+const CURRENCY = '{{ currency_symbol|default:"Rs" }}';
+let paymentMethod = 'cash';
+let discountType = 'none';
+let customerPoints = 0;
+let searchTimer = null;
+
+/* ── Re-translate dynamic JS strings on language change ────────────────── */
+document.addEventListener('langchange', () => {
+  /* checkout button (if not mid-processing) */
+  const btn = document.getElementById('checkoutBtn');
+  if (btn && btn.textContent !== t('pos.processing')) {
+    btn.textContent = cart.length > 0 ? t('pos.complete') : t('pos.complete');
+  }
+  /* re-render cart so stock/each labels update */
+  if (cart.length) renderCart();
+});
+
+/* ── Tab switching ──────────────────────────────────────────────────────── */
+function switchTab(tab, el) {
+  document.querySelectorAll('.search-tab').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  if (tab === 'barcode') {
+    document.getElementById('barcodePanel').style.display = 'block';
+    document.getElementById('namePanel').style.display = 'none';
+    document.getElementById('barcodeInput').focus();
+  } else {
+    document.getElementById('barcodePanel').style.display = 'none';
+    document.getElementById('namePanel').style.display = 'block';
+    document.getElementById('nameSearch').focus();
+  }
+}
+
+/* ── Barcode lookup ─────────────────────────────────────────────────────── */
+async function lookupBarcode() {
+  const barcode = document.getElementById('barcodeInput').value.trim();
+  if (!barcode) return;
+  try {
+    const res = await fetch(`/api/product/?barcode=${encodeURIComponent(barcode)}`);
+    const data = await res.json();
+    if (data.success) { addToCart(data); document.getElementById('barcodeInput').value = ''; }
+    else alert('Product not found: ' + barcode);
+  } catch(e) { alert('Error looking up product'); }
+}
+document.getElementById('barcodeInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') lookupBarcode();
+});
+
+/* ── Name search ────────────────────────────────────────────────────────── */
+function searchByName(q) {
+  clearTimeout(searchTimer);
+  const resultsEl = document.getElementById('searchResults');
+  if (!q.trim()) { resultsEl.style.display = 'none'; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/products/search/?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!data.products.length) {
+        resultsEl.innerHTML = `<div style="padding:12px 14px;color:var(--muted);font-size:13px;">${t('pos.notfound')}</div>`;
+      } else {
+        resultsEl.innerHTML = data.products.map(p => {
+          const safe = JSON.stringify(p).replace(/'/g, "&#39;");
+          return `<div class="search-result-item" onclick='addFromSearch(${safe})'>
+            <div>
+              <div class="search-result-name">${p.name}</div>
+              <div class="search-result-sub">${t('pos.stock')}: ${p.stock} · ${p.barcode}</div>
+            </div>
+            <div class="search-result-price">${CURRENCY} ${p.price.toFixed(2)}</div>
+          </div>`;
+        }).join('');
+      }
+      resultsEl.style.display = 'block';
+    } catch(e) {}
+  }, 250);
+}
+function addFromSearch(product) {
+  addToCart(product);
+  document.getElementById('nameSearch').value = '';
+  document.getElementById('searchResults').style.display = 'none';
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap'))
+    document.getElementById('searchResults').style.display = 'none';
+});
+
+/* ── Cart ───────────────────────────────────────────────────────────────── */
+function addToCart(product) {
+  const existing = cart.find(i => i.product_id === product.id);
+  if (existing) {
+    if (existing.quantity >= product.stock) { showStockAlert(product.name, product.stock); return; }
+    existing.quantity++;
+  } else {
+    if (product.stock <= 0) { showStockAlert(product.name, 0); return; }
+    cart.push({ product_id: product.id, name: product.name, price: product.price, quantity: 1, stock: product.stock, supplier: product.supplier || '' });
+  }
+  renderCart();
+}
+
+function showStockAlert(name, stock) {
+  const msg = stock === 0 ? `⚠️ "${name}" is out of stock!` : `⚠️ Only ${stock} unit${stock===1?'':'s'} of "${name}" available!`;
+  let toast = document.getElementById('stockToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'stockToast';
+    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff5f6d;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .3s;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1'; toast.style.display = 'block';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { toast.style.opacity='0'; setTimeout(()=>toast.style.display='none',300); }, 2500);
+}
+
+function renderCart() {
+  const container = document.getElementById('cartItems');
+  const empty = document.getElementById('cartEmpty');
+  const count = document.getElementById('cartCount');
+
+  if (!cart.length) {
+    empty.style.display = 'flex';
+    container.innerHTML = '';
+    document.getElementById('checkoutBtn').disabled = true;
+    document.getElementById('checkoutBtn').textContent = t('pos.complete');
+    count.textContent = '';
+    updateTotals();
+    return;
+  }
+
+  empty.style.display = 'none';
+  document.getElementById('checkoutBtn').disabled = false;
+
+  const total_items = cart.reduce((s,i) => s+i.quantity, 0);
+  count.textContent = `(${total_items})`;
+
+  container.innerHTML = cart.map((item, idx) => `
+
+    <div class="cart-item">
+
+      <div class="cart-item-name" style="flex:1;min-width:0;">
+        <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${item.name}
+        </div>
+
+        <div class="cart-item-sub">
+          ${CURRENCY} ${item.price.toFixed(2)} ${t('pos.each')}
+          ${item.supplier ? ` · ${item.supplier}` : ''}
+          · 
+          <span style="color:${item.stock-item.quantity<=3?'var(--warn)':'var(--muted)'}">
+            ${t('pos.stock')}: ${item.stock - item.quantity} ${t('pos.left')}
+          </span>
+        </div>
+
+      </div>
+
+      <div class="qty-control">
+        <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
+        <span class="qty-val">${item.quantity}</span>
+        <button class="qty-btn" onclick="changeQty(${idx},1)">+</button>
+      </div>
+
+      <div class="item-total">
+        ${CURRENCY} ${(item.price*item.quantity).toFixed(2)}
+      </div>
+
+      <span class="remove-btn" onclick="removeItem(${idx})">×</span>
+
+    </div>
+
+  `).join('');
+
+  updateTotals();
+}
+
+function changeQty(idx, delta) {
+  if (delta > 0 && cart[idx].quantity >= cart[idx].stock) { showStockAlert(cart[idx].name, cart[idx].stock); return; }
+  cart[idx].quantity += delta;
+  if (cart[idx].quantity <= 0) cart.splice(idx, 1);
+  renderCart();
+}
+function removeItem(idx) { cart.splice(idx, 1); renderCart(); }
+function clearCart() { cart = []; renderCart(); }
+
+/* ── Discount ───────────────────────────────────────────────────────────── */
+function setDiscountType(el) {
+  document.querySelectorAll('.disc-type').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  discountType = el.dataset.type;
+  const inp = document.getElementById('discountInput');
+  if (discountType === 'none') { inp.style.display='none'; document.getElementById('discountValue').value=''; }
+  else { inp.style.display='block'; document.getElementById('discountValue').focus(); }
+  updateTotals();
+}
+function getDiscountAmount(subtotal) {
+  const val = parseFloat(document.getElementById('discountValue').value) || 0;
+  if (discountType === 'percent') return subtotal * (val/100);
+  if (discountType === 'fixed') return Math.min(val, subtotal);
+  return 0;
+}
+
+/* ── Loyalty ────────────────────────────────────────────────────────────── */
+async function onCustomerChange(customerId) {
+  const panel = document.getElementById('loyaltyPanel');
+  const msg = document.getElementById('noCustomerMsg');
+  const info = document.getElementById('loyaltyInfo');
+  document.getElementById('usePointsToggle').checked = false;
+  document.getElementById('pointsInput').style.display = 'none';
+  document.getElementById('pointsToUse').value = '';
+  customerPoints = 0; updateTotals();
+  if (!customerId) {
+    panel.style.display='none'; msg.style.display='block';
+    if (cart.length > 0) { document.getElementById('checkoutBtn').disabled=false; document.getElementById('checkoutBtn').textContent=t('pos.complete'); }
+    return;
+  }
+  try {
+    const res = await fetch(`/api/customer-info/?id=${customerId}`);
+    const data = await res.json();
+    if (data.success) {
+      customerPoints = data.loyalty_points;
+      document.getElementById('availablePoints').textContent = data.loyalty_points;
+      document.getElementById('pointsWorth').textContent = data.points_value.toFixed(2);
+      msg.style.display='none'; panel.style.display='block'; info.style.display='block';
+    }
+  } catch(e) {}
+  if (cart.length > 0) { document.getElementById('checkoutBtn').disabled=false; document.getElementById('checkoutBtn').textContent=t('pos.complete'); }
+}
+function toggleLoyaltyPoints() {
+  const checked = document.getElementById('usePointsToggle').checked;
+  document.getElementById('pointsInput').style.display = checked ? 'block' : 'none';
+  if (!checked) document.getElementById('pointsToUse').value = '';
+  updateTotals();
+  if (cart.length > 0) { document.getElementById('checkoutBtn').disabled=false; document.getElementById('checkoutBtn').textContent=t('pos.complete'); }
+}
+function getLoyaltyDiscount() {
+  if (!document.getElementById('usePointsToggle').checked) return 0;
+  return Math.min(parseInt(document.getElementById('pointsToUse').value)||0, customerPoints) * 0.5;
+}
+
+/* ── Totals ─────────────────────────────────────────────────────────────── */
+function updateTotals() {
+  const subtotal = cart.reduce((s,i) => s+i.price*i.quantity, 0);
+  const discount = getDiscountAmount(subtotal);
+  const loyaltyDiscount = getLoyaltyDiscount();
+  const tax = 0;
+  const total = Math.max(subtotal - discount - loyaltyDiscount + tax, 0);
+  document.getElementById('subtotal').textContent = CURRENCY + ' ' + subtotal.toFixed(2);
+  document.getElementById('taxDisplay').textContent = CURRENCY + ' ' + tax.toFixed(2);
+  document.getElementById('totalDisplay').textContent = CURRENCY + ' ' + total.toFixed(2);
+  const btn = document.getElementById('checkoutBtn');
+  if (cart.length > 0) { if (btn.textContent !== t('pos.processing')) { btn.disabled=false; btn.textContent=t('pos.complete'); } }
+  else { btn.disabled=true; }
+  const discRow = document.getElementById('discountRow');
+  if (discount > 0) { discRow.style.display='flex'; document.getElementById('discountDisplay').textContent=`- ${CURRENCY} ${discount.toFixed(2)}`; }
+  else { discRow.style.display='none'; }
+  const loyRow = document.getElementById('loyaltyRow');
+  if (loyaltyDiscount > 0) { loyRow.style.display='flex'; document.getElementById('loyaltyDisplay').textContent=`- ${CURRENCY} ${loyaltyDiscount.toFixed(2)}`; document.getElementById('pointsDiscount').textContent=loyaltyDiscount.toFixed(2); }
+  else { loyRow.style.display='none'; }
+  calcChange();
+}
+function calcChange() {
+  const subtotal = cart.reduce((s,i) => s+i.price*i.quantity, 0);
+  const discount = getDiscountAmount(subtotal);
+  const loyaltyDiscount = getLoyaltyDiscount();
+  const total = Math.max(subtotal - discount - loyaltyDiscount, 0);
+  const received = parseFloat(document.getElementById('amountReceived').value) || 0;
+  const change = received - total;
+  document.getElementById('changeDisplay').textContent = change >= 0 ? CURRENCY + ' ' + change.toFixed(2) : '-';
+}
+
+/* ── Payment ────────────────────────────────────────────────────────────── */
+function selectPayment(el) {
+  document.querySelectorAll('.pay-method').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  paymentMethod = el.dataset.method;
+  document.getElementById('cashFields').style.display = paymentMethod === 'cash' ? 'block' : 'none';
+}
+
+/* ── Checkout ───────────────────────────────────────────────────────────── */
+async function processCheckout() {
+
+  if (!cart.length) return;
+
+  const subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
+  const discount = getDiscountAmount(subtotal);
+
+  const discountVal = parseFloat(document.getElementById('discountValue').value) || 0;
+
+  const pointsToUse = document.getElementById('usePointsToggle').checked
+    ? Math.min(parseInt(document.getElementById('pointsToUse').value) || 0, customerPoints)
+    : 0;
+
+  const loyaltyDiscount = pointsToUse * 0.5;
+
+  const total = Math.max(subtotal - discount - loyaltyDiscount, 0);
+
+  const amountReceived = parseFloat(document.getElementById('amountReceived').value) || total;
+
+  if (paymentMethod === 'cash' && amountReceived < total) {
+    alert('Amount received is less than total!');
+    return;
+  }
+
+  const checkoutBtn = document.getElementById('checkoutBtn');
+
+  checkoutBtn.disabled = true;
+  checkoutBtn.textContent = t('pos.processing');
+
+  try {
+
+    const res = await fetch('/pos/checkout/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({
+        cart,
+        payment_method: paymentMethod,
+        amount_received: amountReceived,
+        customer_id: document.getElementById('customerSelect').value || null,
+        discount_type: discountType,
+        discount_value: discountVal,
+        use_loyalty_points: pointsToUse
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+
+      const change = paymentMethod === 'cash' ? amountReceived - total : 0;
+
+      document.getElementById('saleInfo').textContent =
+        `Sale #${data.sale_number} · ${CURRENCY} ${data.total.toFixed(2)}`;
+
+      document.getElementById('changeInfo').textContent =
+        paymentMethod === 'cash'
+          ? `${t('pos.change')}: ${CURRENCY} ${change.toFixed(2)}`
+          : 'Payment received ✓';
+
+      /* ---- Loyalty Points ---- */
+
+      const ptsEl = document.getElementById('pointsEarnedInfo');
+
+      if (data.points_earned > 0) {
+        ptsEl.textContent = `⭐ +${data.points_earned} loyalty points earned!`;
+        ptsEl.style.display = 'block';
+      } else {
+        ptsEl.style.display = 'none';
+      }
+
+      /* ---- FBR Invoice ---- */
+
+      const fbrEl = document.getElementById('fbrInfo');
+
+      if (data.fbr_invoice_no) {
+
+        fbrEl.innerHTML = `🏛️ FBR Invoice # <strong>${data.fbr_invoice_no}</strong>`;
+        fbrEl.style.display = 'block';
+
+      } else if (data.fbr_status === 'failed') {
+
+        fbrEl.innerHTML = '⚠️ FBR submission failed — retry from FBR Settings';
+        fbrEl.style.display = 'block';
+        fbrEl.style.background = 'rgba(245,166,35,.08)';
+        fbrEl.style.color = 'var(--warn)';
+
+      } else {
+
+        fbrEl.style.display = 'none';
+
+      }
+
+      /* ---- Receipt ---- */
+
+      document.getElementById('receiptLink').href = `/receipt/${data.sale_id}/`;
+
+      /* ---- Show Modal ---- */
+
+      document.getElementById('successModal').classList.add('show');
+
+    } else {
+
+      alert('Error: ' + data.message);
+
+      checkoutBtn.disabled = false;
+      checkoutBtn.textContent = t('pos.complete');
+
+    }
+
+  } catch (e) {
+
+    alert('Checkout failed.');
+
+    checkoutBtn.disabled = false;
+    checkoutBtn.textContent = t('pos.complete');
+
+  }
+
+}
+function newSale() {
+  document.getElementById('successModal').classList.remove('show');
+  clearCart();
+  document.getElementById('amountReceived').value='';
+  document.getElementById('discountValue').value='';
+  document.getElementById('pointsToUse').value='';
+  document.getElementById('usePointsToggle').checked=false;
+  document.getElementById('pointsInput').style.display='none';
+  document.querySelectorAll('.disc-type').forEach((b,i) => { if(i===0) b.classList.add('active'); else b.classList.remove('active'); });
+  discountType='none';
+  document.getElementById('discountInput').style.display='none';
+  document.getElementById('checkoutBtn').textContent=t('pos.complete');
+  document.getElementById('barcodeInput').focus();
+}
+
+function getCookie(name) {
+  const v = document.cookie.match('(^|;) ?'+name+'=([^;]*)(;|$)');
+  return v ? v[2] : null;
+}
+</script>
+{% endblock %}
