@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: smartpos
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput"
+    startCommand: "gunicorn smartpos.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+    healthCheckPath: /login/
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true          # Render auto-generates a secure random value
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: "smartpos.onrender.com"   # ← change to your actual Render URL after first deploy
+      - key: SITE_URL
+        value: "https://smartpos.onrender.com"  # ← same as above
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smartpos-db
+          property: connectionString
+      - key: EMAIL_BACKEND
+        value: "django.core.mail.backends.smtp.EmailBackend"
+      - key: EMAIL_HOST
+        value: "smtp.gmail.com"
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USE_TLS
+        value: "True"
+      - key: EMAIL_HOST_USER
+        sync: false    # Set this manually in Render dashboard
+      - key: EMAIL_HOST_PASSWORD
+        sync: false    # Set this manually in Render dashboard (use Gmail App Password)
+      - key: TIME_ZONE
+        value: "Asia/Karachi"
+
+databases:
+  - name: smartpos-db
+    plan: free          # Free PostgreSQL — expires after 30 days, upgrade when ready
+    databaseName: smartpos
+    user: smartpos_user

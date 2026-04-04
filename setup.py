@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
-SmartPOS Setup Script
-Run this once after deployment to initialize the database.
+SmartPOS Cloud Setup Script
+Runs automatically on every Render deploy (via Procfile release command).
+Safe to run multiple times — all operations are idempotent.
 """
 import os
 import sys
