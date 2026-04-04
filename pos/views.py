@@ -706,6 +706,7 @@ def checkout(request):
     # Never trust client-submitted prices.
     validated_items = []
     for item in cart:
+        
         try:
             product_id = int(item['product_id'])
             quantity   = int(item['quantity'])

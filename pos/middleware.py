@@ -1,15 +1,14 @@
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.contrib import messages
 from django.utils import timezone
 from .utils import get_user_store
 
-
 class StoreScopeMiddleware:
     """
-    Runs on every request after authentication.
-    Attaches request.store from the logged-in user's UserProfile.
-    Blocks access if store is suspended or trial has expired.
-    Superusers bypass all checks (they float above all stores).
+    Middleware to scope every request to a specific Store.
+    - Attaches request.store to the request object.
+    - Enforces suspension and trial expiration rules.
+    - Exempts administrative and auth paths.
     """
 
     EXEMPT_PATHS = [
@@ -26,43 +25,42 @@ class StoreScopeMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        request.store = None  # always set a default
+        # 1. Default initialization
+        request.store = None
 
-        if request.user.is_authenticated:
-            self._attach_store(request)
+        # 2. Bypass for unauthenticated users or Superadmins
+        # Superadmins "float" above stores and resolve context in specific views
+        if not request.user.is_authenticated or request.user.is_superuser:
+            return self.get_response(request)
 
-        return self.get_response(request)
-
-    def _attach_store(self, request):
-        # Superusers float above all stores — store is resolved per-view as needed
-        if request.user.is_superuser:
-            request.store = None
-            return
-
-        # Skip checks on exempt paths
+        # 3. Check if current path is exempt from store-scoping
         path = request.path
-        if any(path.startswith(p) for p in self.EXEMPT_PATHS):
-            return
+        is_exempt = any(path.startswith(p) for p in self.EXEMPT_PATHS)
+        
+        if is_exempt:
+            return self.get_response(request)
 
+        # 4. Resolve the Store
         store = get_user_store(request.user)
 
-        if store is None:
-            # User has no store assigned — send to login
+        # 5. Validation Logic (Fail-Fast)
+        if not store:
             messages.error(request, "Your account is not linked to any store.")
-            request.store = None
-            return
+            return redirect('login')
 
-        # Check store is active
         if store.status == 'suspended':
-            messages.error(request, "Your store has been suspended. Please contact support.")
-            request.store = None
-            return
+            # Use a dedicated error template for suspended accounts
+            return render(request, 'errors/suspended.html', {'store': store}, status=403)
 
-        # Check trial hasn't expired
+        # 6. Trial Expiration Check
         if store.trial_ends_at and store.trial_ends_at < timezone.now():
-            if store.plan == 'starter':  # still on trial plan
-                messages.warning(request, "Your trial has expired. Please upgrade your plan.")
-                request.store = None
-                return
+            # If they are still on the starter/trial plan but time is up
+            if store.plan == 'starter':
+                messages.warning(request, "Your trial has expired. Please upgrade your plan to continue.")
+                # You can either redirect to a pricing page or allow restricted access
+                # For POS systems, we usually block access to the checkout:
+                return render(request, 'errors/trial_expired.html', {'store': store})
 
+        # 7. Success: Attach store and proceed
         request.store = store
+        return self.get_response(request)

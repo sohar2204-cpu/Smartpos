@@ -1,0 +1,8 @@
+[2026-04-04 03:31:15,425] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 03:31:20,506] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 09:50:05,084] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 10:21:29,886] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 10:21:35,348] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 10:26:55,615] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 10:27:21,713] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
+[2026-04-04 10:28:59,771] WARNING django.security.csrf Forbidden (CSRF token from the 'X-Csrftoken' HTTP header has incorrect length.): /pos/checkout/
