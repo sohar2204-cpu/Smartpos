@@ -304,15 +304,24 @@ function switchLang(lang){ applyLang(lang); }
     </div>
   </div>
   <div class="sidebar-footer">
-    <div class="user-chip">
-      <div class="user-avatar">{{ request.user.username|first|upper }}</div>
-      <div>
-        <div class="user-name">{{ request.user.get_full_name|default:request.user.username }}</div>
-        <div class="user-role">{% if request.user.profile %}{{ request.user.profile.role|title }}{% else %}User{% endif %}</div>
-      </div>
+  <div class="user-chip">
+    <div class="user-avatar">{{ request.user.username|first|upper }}</div>
+    <div>
+      <div class="user-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+      <div class="user-role">{% if request.user.profile %}{{ request.user.profile.role|title }}{% else %}User{% endif %}</div>
     </div>
-    <a href="{% url 'logout' %}" style="display:block;margin-top:12px;font-size:12px;color:var(--muted);">↪ <span data-t="nav.signout">Sign out</span></a>
   </div>
+
+  <form id="logout-form" action="{% url 'logout' %}" method="POST" style="display: none;">
+    {% csrf_token %}
+  </form>
+
+  <a href="javascript:void(0)" 
+     onclick="document.getElementById('logout-form').submit();" 
+     style="display:block;margin-top:12px;font-size:12px;color:var(--muted); cursor:pointer;">
+     ↪ <span data-t="nav.signout">Sign out</span>
+  </a>
+</div>
 </nav>
 
 <div class="main">

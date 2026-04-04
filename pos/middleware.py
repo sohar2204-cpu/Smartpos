@@ -2,6 +2,24 @@ from django.shortcuts import redirect, render
 from django.contrib import messages
 from django.utils import timezone
 from .utils import get_user_store
+from django.shortcuts import redirect
+from django.urls import reverse
+
+class RestrictSuperuserMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.user.is_authenticated:
+            # ONLY force Superadmins to the Admin Panel
+            if request.user.is_superuser:
+                if not request.path.startswith('/admin/') and request.path != reverse('logout'):
+                    return redirect('/admin/')
+            
+            # DO NOT add an 'else' redirect for regular users here. 
+            # Let them go wherever the LOGIN_REDIRECT_URL tells them.
+
+        return self.get_response(request)
 
 class StoreScopeMiddleware:
     """

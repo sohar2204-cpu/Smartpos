@@ -50,6 +50,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'pos.middleware.RestrictSuperuserMiddleware',
     'pos.middleware.StoreScopeMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -130,7 +131,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ── Auth redirects ─────────────────────────────────────────────────────────────
 LOGIN_URL          = '/login/'
-LOGIN_REDIRECT_URL = '/dashboard/'
+LOGIN_REDIRECT_URL = 'pos'
 LOGOUT_REDIRECT_URL= '/login/'
 
 LOW_STOCK_THRESHOLD = 10
