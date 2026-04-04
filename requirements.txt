@@ -5,14 +5,11 @@ cffi==2.0.0
 charset-normalizer==3.4.5
 cryptography==46.0.5
 dj-database-url==3.1.2
-Django==6.0.3
+Django==5.0.6
 django-dbbackup==5.2.0
 et_xmlfile==2.0.0
-google-api-core<2.0.0
 googleapis-common-protos==1.73.0
-google-auth>=1.28.0,<2.0.0
 google-auth-oauthlib==0.4.6
-google-api-python-client>=1.12.1,<2.0.0
 google-auth-httplib2==0.1.0
 django-googledrive-storage==1.6.0
 gunicorn==25.3.0
@@ -38,6 +35,9 @@ setuptools==82.0.1
 six==1.17.0
 sqlparse==0.5.5
 tzdata==2025.3
-uritemplate==4.2.0
 urllib3==2.6.3
 whitenoise==6.12.0
+google-api-core==2.19.1
+google-auth==2.29.0
+google-api-python-client==2.108.0
+uritemplate==4.1.1
