@@ -1,8 +1,10 @@
 import json
 import csv
 import io
+import logging
 import threading
-from decimal import Decimal
+import re as _re
+from decimal import Decimal, InvalidOperation
 from datetime import date, timedelta
 
 from django.shortcuts import render, redirect, get_object_or_404
@@ -10,16 +12,28 @@ from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum, Count, Q, F
 from django.contrib import messages
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.core.cache import cache
+from django.conf import settings
 
 from .decorators import store_required, role_required, superadmin_required
 from .utils import store_queryset, get_user_store, log_action
-from .models import *
+from .models import (
+    Store, UserProfile, Product, Category, Supplier, Customer,
+    Sale, SaleItem, Return, StoreSettings, TaxRule, Expense,
+    ExpenseCategory, SupplierPayment, StockPurchase, StockPurchaseItem,
+    Shift, BackupLog, AuditLog,
+)
 
+logger = logging.getLogger('pos.security')
+
+# ── Allowed image MIME types ───────────────────────────────────────────────────
+_ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+_MAX_IMAGE_BYTES      = 3 * 1024 * 1024   # 3 MB
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPERS
@@ -38,6 +52,32 @@ def audit(request, action, detail=''):
         log_action(request, action, detail)
     except Exception:
         pass
+
+
+def _safe_redirect(url: str, fallback: str = '/dashboard/') -> str:
+    """
+    FIX SEC-REDIRECT: Validate 'next' is a relative path.
+    Prevents open-redirect attacks by rejecting any URL with a scheme or netloc.
+    """
+    if not url:
+        return fallback
+    # Must be a relative path — no scheme, no double-slash host
+    if url.startswith('//') or '://' in url or not url.startswith('/'):
+        return fallback
+    return url
+
+
+def _validate_image(file_obj) -> str | None:
+    """
+    FIX SEC-UPLOAD: Validate image MIME type and size.
+    Returns an error string on failure, None on success.
+    """
+    if file_obj.size > _MAX_IMAGE_BYTES:
+        return f"Image must be smaller than {_MAX_IMAGE_BYTES // (1024*1024)} MB."
+    content_type = file_obj.content_type
+    if content_type not in _ALLOWED_IMAGE_TYPES:
+        return f"Invalid image type '{content_type}'. Allowed: JPEG, PNG, GIF, WebP."
+    return None
 
 
 def calculate_tax(subtotal, cart_items, store):
@@ -77,10 +117,10 @@ def calculate_tax(subtotal, cart_items, store):
         rule_tax = rule_tax.quantize(Decimal('0.01'))
         tax_amount += rule_tax
         breakdown.append({
-            'name': rule.name,
-            'type': rule.tax_type,
-            'rate': float(rule.rate),
-            'mode': rule.tax_mode,
+            'name':   rule.name,
+            'type':   rule.tax_type,
+            'rate':   float(rule.rate),
+            'mode':   rule.tax_mode,
             'amount': float(rule_tax),
         })
 
@@ -95,27 +135,84 @@ def get_currency(store):
         return 'Rs', Decimal('1')
 
 
+def resolve_store(request):
+    """
+    Returns a valid store for the request.
+    For superusers with no store context, falls back to the first store.
+    """
+    if request.store:
+        return request.store
+    if request.user.is_superuser:
+        from .models import Store
+        return Store.objects.first()
+    return None
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# AUTH  (exempt from StoreScopeMiddleware — no @store_required needed)
+# RATE LIMITING HELPER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _check_login_rate_limit(ip: str, identifier: str, max_attempts: int = 5, window: int = 300) -> bool:
+    """
+    FIX SEC-RATELIMIT: Simple cache-based rate limiting.
+    Returns True if the request is allowed, False if blocked.
+    Window is in seconds (default 5 minutes).
+    """
+    cache_key = f"login_attempts:{identifier}:{ip}"
+    attempts  = cache.get(cache_key, 0)
+    if attempts >= max_attempts:
+        return False
+    cache.set(cache_key, attempts + 1, timeout=window)
+    return True
+
+
+def _reset_login_rate_limit(ip: str, identifier: str):
+    cache_key = f"login_attempts:{identifier}:{ip}"
+    cache.delete(cache_key)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH
 # ══════════════════════════════════════════════════════════════════════════════
 
 def login_view(request):
     if request.user.is_authenticated:
         return redirect('dashboard')
+
     if request.method == 'POST':
-        username = request.POST.get('username')
-        password = request.POST.get('password')
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        ip       = get_client_ip(request)
+
+        # FIX SEC-RATELIMIT: Block after 5 failed attempts per IP per username
+        if not _check_login_rate_limit(ip, username):
+            logger.warning(f"Login rate limit hit for username='{username}' ip={ip}")
+            messages.error(request, 'Too many login attempts. Please wait 5 minutes.')
+            return render(request, 'pos/login.html', {'next': request.GET.get('next', '')})
+
         user = authenticate(request, username=username, password=password)
         if user:
+            _reset_login_rate_limit(ip, username)
             login(request, user)
-            audit(request, 'login', f'User "{username}" logged in')
-            return redirect(request.POST.get('next') or request.GET.get('next') or '/')
+            audit(request, 'login', f'User "{username}" logged in from {ip}')
+            # FIX SEC-REDIRECT: Validate next parameter before redirect
+            next_url = _safe_redirect(
+                request.POST.get('next') or request.GET.get('next'), '/dashboard/'
+            )
+            return redirect(next_url)
+
+        audit(request, 'login_failed', f'Failed login for "{username}" from {ip}')
+        logger.warning(f"Failed login attempt: username='{username}' ip={ip}")
         messages.error(request, 'Invalid credentials.')
+
     return render(request, 'pos/login.html', {'next': request.GET.get('next', '')})
 
 
+@require_POST   # FIX SEC-LOGOUT-CSRF: Logout must be POST to prevent CSRF logout
+@login_required
 def logout_view(request):
-    audit(request, 'logout', f'User "{request.user.username}" logged out')
+    username = request.user.username
+    audit(request, 'logout', f'User "{username}" logged out')
     logout(request)
     return redirect('login')
 
@@ -123,16 +220,40 @@ def logout_view(request):
 def pin_login_view(request):
     if request.user.is_authenticated:
         return redirect('dashboard')
+
     if request.method == 'POST':
         pin = request.POST.get('pin', '').strip()
+        ip  = get_client_ip(request)
+
+        # FIX SEC-RATELIMIT: PIN brute-force protection (4-digit = 10,000 combinations)
+        if not _check_login_rate_limit(ip, 'pin', max_attempts=5, window=300):
+            logger.warning(f"PIN login rate limit hit from ip={ip}")
+            messages.error(request, 'Too many PIN attempts. Please wait 5 minutes.')
+            return render(request, 'pos/pin_login.html', {'next': request.GET.get('next', '')})
+
         if pin:
-            try:
-                profile = UserProfile.objects.get(pin=pin)
+            # FIX SEC-PIN: Check hashed PINs, not plaintext
+            profile = None
+            for p in UserProfile.objects.select_related('user').all():
+                if p.check_pin(pin):
+                    profile = p
+                    break
+
+            if profile:
+                _reset_login_rate_limit(ip, 'pin')
                 login(request, profile.user,
                       backend='django.contrib.auth.backends.ModelBackend')
-                return redirect(request.POST.get('next') or request.GET.get('next') or '/')
-            except UserProfile.DoesNotExist:
-                messages.error(request, 'Invalid PIN.')
+                audit(request, 'pin_login',
+                      f'PIN login by {profile.user.username} from {ip}')
+                next_url = _safe_redirect(
+                    request.POST.get('next') or request.GET.get('next'), '/'
+                )
+                return redirect(next_url)
+
+            audit(request, 'pin_failed', f'Failed PIN login from {ip}')
+            logger.warning(f"Failed PIN login from ip={ip}")
+            messages.error(request, 'Invalid PIN.')
+
     return render(request, 'pos/pin_login.html', {'next': request.GET.get('next', '')})
 
 
@@ -160,11 +281,10 @@ def dashboard(request):
         rev = qs.filter(created_at__date=d).aggregate(t=Sum('total_amount'))['t'] or 0
         daily_data.append({'date': d.strftime('%a'), 'revenue': float(rev)})
 
-    pqs       = store_queryset(Product, request).filter(is_active=True)
-    low_stock = pqs.filter(stock_quantity__lte=F('low_stock_threshold'), stock_quantity__gt=0)
+    pqs          = store_queryset(Product, request).filter(is_active=True)
+    low_stock    = pqs.filter(stock_quantity__lte=F('low_stock_threshold'), stock_quantity__gt=0)
     out_of_stock = pqs.filter(stock_quantity=0)
 
-    # Top products scoped to this store's sales
     sale_ids = qs.values_list('id', flat=True)
     top_products = (
         SaleItem.objects.filter(sale_id__in=sale_ids)
@@ -180,20 +300,23 @@ def dashboard(request):
     )
 
     return render(request, 'pos/dashboard.html', {
-        'today_revenue':    today_revenue,
-        'today_count':      today_count,
-        'week_revenue':     week_revenue,
-        'total_products':   pqs.count(),
-        'low_stock_count':  low_stock.count(),
+        'today_revenue':      today_revenue,
+        'today_count':        today_count,
+        'week_revenue':       week_revenue,
+        'total_products':     pqs.count(),
+        'low_stock_count':    low_stock.count(),
         'out_of_stock_count': out_of_stock.count(),
-        'low_stock_items':  low_stock[:5],
-        'daily_data':       json.dumps(daily_data),
-        'top_products':     list(top_products),
-        'cat_data':         json.dumps([
-            {'name': c['product__category__name'] or 'Uncategorized', 'value': float(c['revenue'])}
+        'low_stock_items':    low_stock[:5],
+        # FIX SEC-XSS: Use json.dumps() output via the |json_script tag in templates,
+        # not |safe. We keep json.dumps here but the template must use json_script.
+        'daily_data':         json.dumps(daily_data),
+        'top_products':       list(top_products),
+        'cat_data':           json.dumps([
+            {'name': c['product__category__name'] or 'Uncategorized',
+             'value': float(c['revenue'])}
             for c in cat_data
         ]),
-        'currency_symbol':  get_currency(store)[0],
+        'currency_symbol':    get_currency(store)[0],
     })
 
 
@@ -213,7 +336,6 @@ def product_list(request):
         qs = qs.filter(category_id=category_id)
 
     categories = store_queryset(Category, request)
-
     return render(request, 'pos/products.html', {
         'products':          qs,
         'categories':        categories,
@@ -227,13 +349,31 @@ def product_add(request):
     store = request.store
     if request.method == 'POST':
         try:
+            # FIX SEC-INPUT: Validate price/cost fields are valid decimals
+            try:
+                price      = Decimal(request.POST.get('price', '0'))
+                cost_price = Decimal(request.POST.get('cost_price', '0'))
+                stock_qty  = int(request.POST.get('stock_quantity', 0))
+                threshold  = int(request.POST.get('low_stock_threshold', 10))
+            except (InvalidOperation, ValueError):
+                messages.error(request, 'Invalid price or quantity values.')
+                return redirect('product_add')
+
+            if price < 0 or cost_price < 0 or stock_qty < 0:
+                messages.error(request, 'Price, cost and stock cannot be negative.')
+                return redirect('product_add')
+
+            name    = request.POST.get('name', '').strip()
+            barcode = request.POST.get('barcode', '').strip()
+            if not name or not barcode:
+                messages.error(request, 'Name and barcode are required.')
+                return redirect('product_add')
+
             p = Product(
-                name=request.POST['name'],
-                barcode=request.POST['barcode'],
-                price=request.POST['price'],
-                cost_price=request.POST.get('cost_price', 0),
-                stock_quantity=request.POST.get('stock_quantity', 0),
-                low_stock_threshold=request.POST.get('low_stock_threshold', 10),
+                name=name, barcode=barcode,
+                price=price, cost_price=cost_price,
+                stock_quantity=stock_qty,
+                low_stock_threshold=threshold,
                 store=store,
             )
             cat_id = request.POST.get('category')
@@ -242,15 +382,23 @@ def product_add(request):
             sup_id = request.POST.get('supplier')
             if sup_id:
                 p.supplier = get_object_or_404(Supplier, id=sup_id, store=store)
+
             if 'image' in request.FILES:
-                p.image = request.FILES['image']
+                img_file = request.FILES['image']
+                err = _validate_image(img_file)
+                if err:
+                    messages.error(request, err)
+                    return redirect('product_add')
+                p.image = img_file
+
             p.save()
             audit(request, 'product_add',
-                  f'Added product "{p.name}" — Barcode: {p.barcode} — Price: Rs {p.price}')
+                  f'Added product "{p.name}" — Barcode: {p.barcode} — Price: {p.price}')
             messages.success(request, 'Product added successfully.')
             return redirect('products')
         except Exception as e:
-            messages.error(request, f'Error: {e}')
+            logger.error(f"product_add error: {e}")
+            messages.error(request, 'An error occurred while adding the product.')
 
     return render(request, 'pos/product_form.html', {
         'categories': store_queryset(Category, request),
@@ -266,13 +414,32 @@ def product_edit(request, pk):
 
     if request.method == 'POST':
         try:
-            old_price             = product.price
-            product.name          = request.POST['name']
-            product.barcode       = request.POST['barcode']
-            product.price         = request.POST['price']
-            product.cost_price    = request.POST.get('cost_price', 0)
-            product.stock_quantity= request.POST.get('stock_quantity', 0)
-            product.low_stock_threshold = request.POST.get('low_stock_threshold', 10)
+            try:
+                price      = Decimal(request.POST.get('price', '0'))
+                cost_price = Decimal(request.POST.get('cost_price', '0'))
+                stock_qty  = int(request.POST.get('stock_quantity', 0))
+                threshold  = int(request.POST.get('low_stock_threshold', 10))
+            except (InvalidOperation, ValueError):
+                messages.error(request, 'Invalid price or quantity values.')
+                return redirect('product_edit', pk=pk)
+
+            if price < 0 or cost_price < 0:
+                messages.error(request, 'Price and cost cannot be negative.')
+                return redirect('product_edit', pk=pk)
+
+            name    = request.POST.get('name', '').strip()
+            barcode = request.POST.get('barcode', '').strip()
+            if not name or not barcode:
+                messages.error(request, 'Name and barcode are required.')
+                return redirect('product_edit', pk=pk)
+
+            old_price          = product.price
+            product.name       = name
+            product.barcode    = barcode
+            product.price      = price
+            product.cost_price = cost_price
+            product.stock_quantity      = stock_qty
+            product.low_stock_threshold = threshold
 
             cat_id = request.POST.get('category')
             product.category = get_object_or_404(Category, id=cat_id, store=store) if cat_id else None
@@ -281,19 +448,27 @@ def product_edit(request, pk):
             product.supplier = get_object_or_404(Supplier, id=sup_id, store=store) if sup_id else None
 
             if 'image' in request.FILES:
-                product.image = request.FILES['image']
+                img_file = request.FILES['image']
+                err = _validate_image(img_file)
+                if err:
+                    messages.error(request, err)
+                    return redirect('product_edit', pk=pk)
+                product.image = img_file
+
             product.save()
 
             if str(old_price) != str(product.price):
                 audit(request, 'price_change',
-                      f'Price of "{product.name}" changed from Rs {old_price} to Rs {product.price}')
+                      f'Price of "{product.name}" changed from {old_price} to {product.price}')
             else:
                 audit(request, 'product_edit',
                       f'Edited product "{product.name}" — Barcode: {product.barcode}')
+
             messages.success(request, 'Product updated.')
             return redirect('products')
         except Exception as e:
-            messages.error(request, f'Error: {e}')
+            logger.error(f"product_edit error: {e}")
+            messages.error(request, 'An error occurred while updating the product.')
 
     return render(request, 'pos/product_form.html', {
         'product':    product,
@@ -304,53 +479,82 @@ def product_edit(request, pk):
 
 
 @store_required
+@require_POST
 def product_delete(request, pk):
     product = get_object_or_404(Product, pk=pk, store=request.store)
-    if request.method == 'POST':
-        audit(request, 'product_delete',
-              f'Deleted product "{product.name}" — Barcode: {product.barcode}')
-        product.is_active = False
-        product.save()
-        messages.success(request, 'Product removed.')
+    audit(request, 'product_delete',
+          f'Deleted product "{product.name}" — Barcode: {product.barcode}')
+    product.is_active = False
+    product.save()
+    messages.success(request, 'Product removed.')
     return redirect('products')
 
 
 @store_required
+@require_POST
 def product_csv_import(request):
-    if request.method == 'POST' and request.FILES.get('csv_file'):
-        store   = request.store
-        decoded = request.FILES['csv_file'].read().decode('utf-8')
-        reader  = csv.DictReader(io.StringIO(decoded))
-        count   = 0
-        for row in reader:
-            try:
-                Product.objects.update_or_create(
-                    barcode=row['barcode'],
-                    store=store,
-                    defaults={
-                        'name':          row['name'],
-                        'price':         row.get('price', 0),
-                        'stock_quantity':row.get('stock', 0),
-                        'store':         store,
-                    }
-                )
-                count += 1
-            except Exception:
-                pass
-        messages.success(request, f'Imported {count} products.')
+    if not request.FILES.get('csv_file'):
+        messages.error(request, 'No file provided.')
+        return redirect('products')
+
+    store   = request.store
+    csv_file = request.FILES['csv_file']
+
+    # FIX SEC-UPLOAD: Validate CSV file type and size
+    if csv_file.size > 5 * 1024 * 1024:
+        messages.error(request, 'CSV file too large (max 5 MB).')
+        return redirect('products')
+
+    try:
+        decoded = csv_file.read().decode('utf-8')
+    except UnicodeDecodeError:
+        messages.error(request, 'File must be UTF-8 encoded.')
+        return redirect('products')
+
+    reader = csv.DictReader(io.StringIO(decoded))
+    count  = 0
+    errors = 0
+    for row in reader:
+        try:
+            barcode = str(row.get('barcode', '')).strip()
+            name    = str(row.get('name', '')).strip()
+            if not barcode or not name:
+                continue
+            price = Decimal(str(row.get('price', 0)))
+            stock = int(row.get('stock', 0))
+            if price < 0 or stock < 0:
+                errors += 1
+                continue
+            Product.objects.update_or_create(
+                barcode=barcode, store=store,
+                defaults={'name': name, 'price': price, 'stock_quantity': stock, 'store': store}
+            )
+            count += 1
+        except Exception:
+            errors += 1
+
+    msg = f'Imported {count} products.'
+    if errors:
+        msg += f' {errors} rows skipped due to errors.'
+    messages.success(request, msg)
     return redirect('products')
 
 
-# ── Product API endpoints ─────────────────────────────────────────────────────
+# ── Product API endpoints ──────────────────────────────────────────────────────
 
+@login_required   # FIX SEC-AUTH: Was completely unauthenticated
 def get_product_by_barcode(request):
-    """Public-ish endpoint — scoped by store if user is authenticated."""
-    barcode = request.GET.get('barcode', '')
+    barcode = request.GET.get('barcode', '').strip()
+    if not barcode:
+        return JsonResponse({'success': False, 'message': 'No barcode provided'})
+
     qs = Product.objects.filter(barcode=barcode, is_active=True)
-    if request.user.is_authenticated:
-        store = get_user_store(request.user)
-        if store:
-            qs = qs.filter(store=store)
+    store = get_user_store(request.user)
+    if store:
+        qs = qs.filter(store=store)
+    elif not request.user.is_superuser:
+        return JsonResponse({'success': False, 'message': 'No store assigned'})
+
     try:
         p = qs.get()
         return JsonResponse({
@@ -366,7 +570,7 @@ def get_product_by_barcode(request):
 @store_required
 def search_products(request):
     q = request.GET.get('q', '').strip()
-    if not q:
+    if not q or len(q) < 1:
         return JsonResponse({'products': []})
 
     qs = store_queryset(Product, request).filter(
@@ -382,7 +586,9 @@ def search_products(request):
         p['supplier'] = p.pop('supplier__name') or ''
     return JsonResponse({'products': products})
 
-#category
+
+# ── Categories ─────────────────────────────────────────────────────────────────
+
 @store_required
 def category_list(request):
     categories = store_queryset(Category, request)
@@ -392,38 +598,41 @@ def category_list(request):
 @store_required
 def category_create(request):
     if request.method == 'POST':
-        Category.objects.create(
-            name=request.POST['name'],
-            store=request.store
-        )
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Category name is required.')
+            return redirect('category_add')
+        Category.objects.create(name=name, store=request.store)
         messages.success(request, "Category added successfully")
         return redirect('categories')
-
     return render(request, 'pos/category_form.html', {'title': 'Add Category'})
 
 
 @store_required
 def category_edit(request, pk):
     category = get_object_or_404(Category, pk=pk, store=request.store)
-
     if request.method == 'POST':
-        category.name = request.POST['name']
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Category name is required.')
+            return redirect('category_edit', pk=pk)
+        category.name = name
         category.save()
         messages.success(request, "Category updated")
         return redirect('categories')
-
     return render(request, 'pos/category_form.html', {
-        'title': 'Edit Category',
-        'category': category
+        'title': 'Edit Category', 'category': category
     })
 
 
 @store_required
+@require_POST   # FIX SEC-CSRF: Category delete must be POST
 def category_delete(request, pk):
     category = get_object_or_404(Category, pk=pk, store=request.store)
     category.delete()
     messages.success(request, "Category deleted")
     return redirect('categories')
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CUSTOMER LOYALTY API
@@ -435,10 +644,10 @@ def get_customer_info(request):
     try:
         c = store_queryset(Customer, request).get(id=customer_id)
         return JsonResponse({
-            'success':       True,
-            'name':          c.name,
-            'loyalty_points':c.loyalty_points,
-            'points_value':  float(c.loyalty_points) * 0.5,
+            'success':        True,
+            'name':           c.name,
+            'loyalty_points': c.loyalty_points,
+            'points_value':   float(c.loyalty_points) * 0.5,
         })
     except Customer.DoesNotExist:
         return JsonResponse({'success': False})
@@ -450,9 +659,9 @@ def get_customer_info(request):
 
 @store_required
 def pos_view(request):
-    store      = request.store
-    customers  = store_queryset(Customer, request)
-    tax_rules  = store_queryset(TaxRule, request).filter(is_active=True)
+    store          = resolve_store(request)
+    customers      = store_queryset(Customer, request)
+    tax_rules      = store_queryset(TaxRule, request).filter(is_active=True)
     currency_symbol, exchange_rate = get_currency(store)
     return render(request, 'pos/pos.html', {
         'customers':       customers,
@@ -465,93 +674,143 @@ def pos_view(request):
 @store_required
 @require_POST
 def checkout(request):
-    data               = json.loads(request.body)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'message': 'Invalid JSON'})
+
     cart               = data.get('cart', [])
     payment_method     = data.get('payment_method', 'cash')
-    amount_received    = Decimal(str(data.get('amount_received', 0)))
     customer_id        = data.get('customer_id')
     discount_type      = data.get('discount_type', 'none')
-    discount_value     = Decimal(str(data.get('discount_value', 0)))
-    use_loyalty_points = int(data.get('use_loyalty_points', 0))
-    store              = request.store
+    store              = resolve_store(request)
+
+    # FIX SEC-DISCOUNT: Validate discount_type against allowed values
+    if discount_type not in ('none', 'percent', 'fixed'):
+        return JsonResponse({'success': False, 'message': 'Invalid discount type'})
+
+    if payment_method not in ('cash', 'card', 'online'):
+        return JsonResponse({'success': False, 'message': 'Invalid payment method'})
+
+    try:
+        amount_received = Decimal(str(data.get('amount_received', 0)))
+        discount_value  = Decimal(str(data.get('discount_value', 0)))
+        use_loyalty_pts = int(data.get('use_loyalty_points', 0))
+    except (InvalidOperation, ValueError):
+        return JsonResponse({'success': False, 'message': 'Invalid numeric values'})
 
     if not cart:
         return JsonResponse({'success': False, 'message': 'Cart is empty'})
 
-    # Stock check — scoped to store
+    # FIX SEC-PRICE: Validate cart items and fetch prices from the DATABASE
+    # Never trust client-submitted prices.
+    validated_items = []
     for item in cart:
         try:
-            p = store_queryset(Product, request).get(id=item['product_id'])
-            if p.stock_quantity < item['quantity']:
-                return JsonResponse({'success': False,
-                                     'message': f'Insufficient stock for {p.name}'})
+            product_id = int(item['product_id'])
+            quantity   = int(item['quantity'])
+            if quantity <= 0:
+                return JsonResponse({'success': False, 'message': 'Quantity must be positive'})
+        except (KeyError, ValueError, TypeError):
+            return JsonResponse({'success': False, 'message': 'Invalid cart item'})
+
+        try:
+            p = store_queryset(Product, request).get(id=product_id, is_active=True)
         except Product.DoesNotExist:
             return JsonResponse({'success': False, 'message': 'Product not found'})
 
-    subtotal                  = sum(Decimal(str(i['price'])) * i['quantity'] for i in cart)
-    tax_amount, tax_breakdown = calculate_tax(subtotal, cart, store)
+        if p.stock_quantity < quantity:
+            return JsonResponse({'success': False,
+                                 'message': f'Insufficient stock for {p.name}'})
+
+        # ── Use DB price, not the client-sent price ────────────────────────
+        validated_items.append({'product': p, 'quantity': quantity, 'price': p.price})
+
+    subtotal                  = sum(i['price'] * i['quantity'] for i in validated_items)
+    tax_amount, tax_breakdown = calculate_tax(
+        subtotal,
+        [{'product_id': i['product'].id, 'price': float(i['price']), 'quantity': i['quantity']}
+         for i in validated_items],
+        store
+    )
 
     # Discount
     discount_amount = Decimal('0')
-    if discount_type == 'percent' and discount_value > 0:
+    if discount_type == 'percent' and 0 < discount_value <= 100:
         discount_amount = subtotal * (discount_value / 100)
     elif discount_type == 'fixed' and discount_value > 0:
         discount_amount = min(discount_value, subtotal)
 
-    # Loyalty points — customer must belong to this store
-    loyalty_discount = Decimal('0')
-    customer         = None
+    # Loyalty points
+    loyalty_discount   = Decimal('0')
+    customer           = None
+    final_loyalty_used = 0
+
     if customer_id:
         try:
             customer       = store_queryset(Customer, request).get(id=customer_id)
-            max_points     = min(use_loyalty_points, customer.loyalty_points)
+            max_points     = min(use_loyalty_pts, customer.loyalty_points)
             loyalty_discount = Decimal(str(max_points)) * Decimal('0.5')
-            use_loyalty_points = max_points
+            final_loyalty_used = max_points
         except Customer.DoesNotExist:
-            use_loyalty_points = 0
+            pass
 
     total  = max(subtotal + tax_amount - discount_amount - loyalty_discount, Decimal('0'))
     change = amount_received - total if payment_method == 'cash' else Decimal('0')
     points_earned = int(total / 100)
 
-    sale = Sale(
-        cashier=request.user,
-        store=store,
-        subtotal=subtotal,
-        tax_amount=tax_amount,
-        discount_type=discount_type,
-        discount_value=discount_value,
-        discount_amount=discount_amount + loyalty_discount,
-        loyalty_points_used=use_loyalty_points,
-        loyalty_points_earned=points_earned,
-        total_amount=total,
-        payment_method=payment_method,
-        amount_received=amount_received,
-        change_amount=change,
-    )
-    if customer:
-        sale.customer = customer
-    sale.save()
+    try:
+        with transaction.atomic():
+            # Re-check stock inside the transaction with select_for_update
+            for vi in validated_items:
+                p_locked = Product.objects.select_for_update().get(id=vi['product'].id)
+                if p_locked.stock_quantity < vi['quantity']:
+                    return JsonResponse({'success': False,
+                                         'message': f'Stock changed for {p_locked.name}'})
 
-    if customer:
-        customer.loyalty_points = customer.loyalty_points - use_loyalty_points + points_earned
-        customer.save()
+            sale = Sale(
+                cashier=request.user,
+                store=store,
+                subtotal=subtotal,
+                tax_amount=tax_amount,
+                discount_type=discount_type,
+                discount_value=discount_value,
+                discount_amount=discount_amount + loyalty_discount,
+                loyalty_points_used=final_loyalty_used,
+                loyalty_points_earned=points_earned,
+                total_amount=total,
+                payment_method=payment_method,
+                amount_received=amount_received,
+                change_amount=change,
+            )
+            if customer:
+                sale.customer = customer
+            sale.save()
 
-    for item in cart:
-        p = store_queryset(Product, request).get(id=item['product_id'])
-        SaleItem.objects.create(
-            sale=sale, product=p,
-            product_name=p.name, product_barcode=p.barcode,
-            quantity=item['quantity'],
-            unit_price=item['price'],
-            total_price=Decimal(str(item['price'])) * item['quantity'],
-        )
-        p.stock_quantity -= item['quantity']
-        p.save()
+            if customer:
+                customer.loyalty_points = customer.loyalty_points - final_loyalty_used + points_earned
+                customer.save()
+
+            for vi in validated_items:
+                p = vi['product']
+                SaleItem.objects.create(
+                    sale=sale, product=p,
+                    product_name=p.name, product_barcode=p.barcode,
+                    quantity=vi['quantity'],
+                    unit_price=vi['price'],
+                    total_price=vi['price'] * vi['quantity'],
+                )
+                Product.objects.filter(id=p.id).update(
+                    stock_quantity=F('stock_quantity') - vi['quantity']
+                )
+
+    except Exception as e:
+        logger.error(f"checkout transaction error: {e}", exc_info=True)
+        return JsonResponse({'success': False, 'message': f'Checkout error: {e}'})
 
     audit(request, 'sale_complete',
-          f'Sale {sale.sale_number} — Rs {total} — {payment_method} — '
-          f'{len(cart)} item(s) — Customer: {customer.name if customer else "Walk-in"}')
+          f'Sale {sale.sale_number} — {total} — {payment_method} — '
+          f'{len(validated_items)} item(s) — Customer: {customer.name if customer else "Walk-in"}')
 
     _trigger_gdrive_auto_backup(store, f'sale_{sale.sale_number}', 'gdrive_backup_on_sale')
 
@@ -572,12 +831,12 @@ def checkout(request):
 
 @store_required
 def receipt_view(request, sale_id):
-    sale = get_object_or_404(Sale, id=sale_id, store=request.store)
-
-    store = request.store
-    if not store:
-        return HttpResponse("Store not found", status=400)
-
+    # Superusers can view any sale; regular users are scoped to their store
+    if request.user.is_superuser:
+        sale = get_object_or_404(Sale, id=sale_id)
+    else:
+        sale = get_object_or_404(Sale, id=sale_id, store=request.store)
+    store        = sale.store  # always use the sale's own store for settings
     settings_obj, _ = StoreSettings.objects.get_or_create(store=store)
 
     whatsapp_enabled = (
@@ -587,19 +846,21 @@ def receipt_view(request, sale_id):
     )
 
     currency_symbol, _ = get_currency(store)
-
     return render(request, 'pos/receipt.html', {
-        'sale': sale,
-        'settings': settings_obj,
+        'sale':             sale,
+        'settings':         settings_obj,
         'whatsapp_enabled': whatsapp_enabled,
-        'template_name': settings_obj.whatsapp_template_name or 'receipt',
-        'currency_symbol': currency_symbol,
+        'template_name':    settings_obj.whatsapp_template_name or 'receipt',
+        'currency_symbol':  currency_symbol,
     })
 
 
 @store_required
 def receipt_pdf(request, sale_id):
-    sale = get_object_or_404(Sale, id=sale_id, store=request.store)
+    if request.user.is_superuser:
+        sale = get_object_or_404(Sale, id=sale_id)
+    else:
+        sale = get_object_or_404(Sale, id=sale_id, store=request.store)
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle
@@ -684,8 +945,11 @@ def receipt_pdf(request, sale_id):
 
 @store_required
 def thermal_receipt(request, sale_id):
-    sale         = get_object_or_404(Sale, id=sale_id, store=request.store)
-    settings_obj, _ = StoreSettings.objects.get_or_create(store=request.store)
+    if request.user.is_superuser:
+        sale = get_object_or_404(Sale, id=sale_id)
+    else:
+        sale = get_object_or_404(Sale, id=sale_id, store=request.store)
+    settings_obj, _ = StoreSettings.objects.get_or_create(store=sale.store)
     return render(request, 'pos/thermal_receipt.html', {
         'sale': sale, 'settings': settings_obj,
     })
@@ -721,8 +985,6 @@ def sales_list(request):
         )
 
     qs = qs.order_by('-created_at')
-
-    # Only show cashiers who belong to this store
     cashiers = User.objects.filter(
         profile__store=request.store, sale__isnull=False
     ).distinct()
@@ -739,13 +1001,26 @@ def sales_list(request):
 
 @store_required
 def process_return(request, sale_id):
-    sale = get_object_or_404(Sale, id=sale_id, store=request.store)
+    if request.user.is_superuser:
+        sale = get_object_or_404(Sale, id=sale_id)
+    else:
+        sale = get_object_or_404(Sale, id=sale_id, store=request.store)
     if request.method == 'POST':
-        item_id  = request.POST.get('item_id')
-        quantity = int(request.POST.get('quantity', 0))
-        reason   = request.POST.get('reason', '')
+        item_id = request.POST.get('item_id')
 
-        item = get_object_or_404(SaleItem, id=item_id, sale=sale)
+        try:
+            quantity = int(request.POST.get('quantity', 0))
+        except ValueError:
+            messages.error(request, 'Invalid quantity.')
+            return redirect('process_return', sale_id=sale_id)
+
+        if quantity <= 0:
+            messages.error(request, 'Quantity must be positive.')
+            return redirect('process_return', sale_id=sale_id)
+
+        reason = request.POST.get('reason', '').strip()
+        item   = get_object_or_404(SaleItem, id=item_id, sale=sale)
+
         if quantity > item.returnable_quantity:
             messages.error(request, 'Return quantity exceeds allowed amount.')
             return redirect('process_return', sale_id=sale_id)
@@ -797,8 +1072,12 @@ def customer_list(request):
 @store_required
 def customer_add(request):
     if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Customer name is required.')
+            return redirect('customer_add')
         Customer.objects.create(
-            name=request.POST['name'],
+            name=name,
             phone=request.POST.get('phone', ''),
             email=request.POST.get('email', ''),
             address=request.POST.get('address', ''),
@@ -813,7 +1092,11 @@ def customer_add(request):
 def customer_edit(request, pk):
     customer = get_object_or_404(Customer, pk=pk, store=request.store)
     if request.method == 'POST':
-        customer.name    = request.POST['name']
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Customer name is required.')
+            return redirect('customer_edit', pk=pk)
+        customer.name    = name
         customer.phone   = request.POST.get('phone', '')
         customer.email   = request.POST.get('email', '')
         customer.address = request.POST.get('address', '')
@@ -844,8 +1127,12 @@ def supplier_list(request):
 @store_required
 def supplier_add(request):
     if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Supplier name is required.')
+            return redirect('supplier_add')
         Supplier.objects.create(
-            name=request.POST['name'],
+            name=name,
             phone=request.POST.get('phone', ''),
             email=request.POST.get('email', ''),
             address=request.POST.get('address', ''),
@@ -860,7 +1147,11 @@ def supplier_add(request):
 def supplier_edit(request, pk):
     supplier = get_object_or_404(Supplier, pk=pk, store=request.store)
     if request.method == 'POST':
-        supplier.name    = request.POST['name']
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Supplier name is required.')
+            return redirect('supplier_edit', pk=pk)
+        supplier.name    = name
         supplier.phone   = request.POST.get('phone', '')
         supplier.email   = request.POST.get('email', '')
         supplier.address = request.POST.get('address', '')
@@ -880,10 +1171,16 @@ def supplier_payments(request, supplier_id):
         action = request.POST.get('action')
 
         if action == 'add_payment':
-            amount = Decimal(request.POST['amount'])
+            try:
+                amount = Decimal(request.POST['amount'])
+                if amount <= 0:
+                    raise ValueError
+            except (KeyError, InvalidOperation, ValueError):
+                messages.error(request, 'Invalid payment amount.')
+                return redirect('supplier_payments', supplier_id=supplier_id)
+
             SupplierPayment.objects.create(
-                supplier=supplier,
-                amount=amount,
+                supplier=supplier, amount=amount,
                 payment_method=request.POST.get('payment_method', 'cash'),
                 reference=request.POST.get('reference', ''),
                 notes=request.POST.get('notes', ''),
@@ -895,7 +1192,11 @@ def supplier_payments(request, supplier_id):
             return redirect('supplier_payments', supplier_id=supplier_id)
 
         elif action == 'add_purchase':
-            paid          = Decimal(request.POST.get('amount_paid', 0))
+            try:
+                paid = Decimal(request.POST.get('amount_paid', 0))
+            except InvalidOperation:
+                paid = Decimal('0')
+
             product_ids   = request.POST.getlist('product_id[]')
             quantities    = request.POST.getlist('quantity[]')
             unit_costs    = request.POST.getlist('unit_cost[]')
@@ -905,18 +1206,18 @@ def supplier_payments(request, supplier_id):
             line_items = []
             for pid, qty, cost, pname in zip(product_ids, quantities, unit_costs, product_names):
                 try:
-                    qty_int    = int(qty)
-                    cost_dec   = Decimal(str(cost))
-                    if qty_int <= 0:
+                    qty_int  = int(qty)
+                    cost_dec = Decimal(str(cost))
+                    if qty_int <= 0 or cost_dec < 0:
                         continue
                     line_total = qty_int * cost_dec
                     total     += line_total
                     line_items.append({
-                        'product_id': int(pid) if pid else None,
+                        'product_id':   int(pid) if pid else None,
                         'product_name': pname,
-                        'quantity': qty_int,
-                        'unit_cost': cost_dec,
-                        'total_cost': line_total,
+                        'quantity':     qty_int,
+                        'unit_cost':    cost_dec,
+                        'total_cost':   line_total,
                     })
                 except Exception:
                     continue
@@ -935,7 +1236,6 @@ def supplier_payments(request, supplier_id):
                 product = None
                 if item['product_id']:
                     try:
-                        # Scope product lookup to this store
                         product = store_queryset(Product, request).get(id=item['product_id'])
                         product.stock_quantity += item['quantity']
                         product.cost_price      = item['unit_cost']
@@ -956,7 +1256,7 @@ def supplier_payments(request, supplier_id):
             audit(request, 'stock_purchase',
                   f'Stock purchase from {supplier.name} — Total: Rs {total} — '
                   f'Paid: Rs {paid} — {len(line_items)} item(s)')
-            messages.success(request, f'Stock purchase recorded. Rs {total} added to balance.')
+            messages.success(request, f'Stock purchase recorded.')
             return redirect('supplier_payments', supplier_id=supplier_id)
 
     return render(request, 'pos/supplier_payments.html', {
@@ -973,8 +1273,12 @@ def supplier_payments(request, supplier_id):
 
 @store_required
 def analytics(request):
-    today      = date.today()
-    days       = int(request.GET.get('period', '30'))
+    today  = date.today()
+    # FIX SEC-INPUT: Clamp period to safe range
+    try:
+        days = max(1, min(int(request.GET.get('period', '30')), 365))
+    except ValueError:
+        days = 30
     start_date = today - timedelta(days=days)
 
     qs = store_queryset(Sale, request).filter(
@@ -1008,7 +1312,8 @@ def analytics(request):
         'daily_data':         json.dumps(daily),
         'top_products':       list(top_products),
         'cat_sales':          json.dumps([
-            {'name': c['product__category__name'] or 'Uncategorized', 'value': float(c['revenue'])}
+            {'name': c['product__category__name'] or 'Uncategorized',
+             'value': float(c['revenue'])}
             for c in cat_sales
         ]),
         'total_revenue':      total_revenue,
@@ -1020,8 +1325,11 @@ def analytics(request):
 
 @store_required
 def profit_report(request):
-    today      = date.today()
-    days       = int(request.GET.get('period', '30'))
+    today  = date.today()
+    try:
+        days = max(1, min(int(request.GET.get('period', '30')), 365))
+    except ValueError:
+        days = 30
     start_date = today - timedelta(days=days)
 
     sale_qs = store_queryset(Sale, request).filter(
@@ -1084,13 +1392,13 @@ def daily_summary_view(request):
     except ValueError:
         report_date = date.today()
 
-    qs = store_queryset(Sale, request).filter(
+    qs       = store_queryset(Sale, request).filter(
         created_at__date=report_date, status='completed'
     )
     items_qs = SaleItem.objects.filter(sale__in=qs).select_related('product')
 
-    total_revenue   = qs.aggregate(t=Sum('total_amount'))['t'] or 0
-    total_cost      = sum(
+    total_revenue = qs.aggregate(t=Sum('total_amount'))['t'] or 0
+    total_cost    = sum(
         float(i.product.cost_price if i.product else 0) * i.quantity for i in items_qs
     )
 
@@ -1133,8 +1441,8 @@ def daily_summary_pdf(request):
     top_products = (items_qs.values('product_name')
                     .annotate(units=Sum('quantity'), revenue=Sum('total_price'))
                     .order_by('-revenue')[:10])
-    total_revenue   = qs.aggregate(t=Sum('total_amount'))['t'] or 0
-    total_cost      = sum(
+    total_revenue = qs.aggregate(t=Sum('total_amount'))['t'] or 0
+    total_cost    = sum(
         float(i.product.cost_price if i.product else 0) * i.quantity
         for i in items_qs.select_related('product')
     )
@@ -1182,7 +1490,6 @@ def daily_summary_pdf(request):
             Spacer(1, 0.3*cm),
         ]
 
-        # Summary
         story.append(Paragraph('Sales Summary', heading))
         t1 = Table([
             ['Metric', 'Value'],
@@ -1195,7 +1502,6 @@ def daily_summary_pdf(request):
         t1.setStyle(TableStyle(base_ts + [('FONTNAME', (0,5), (-1,5), 'Helvetica-Bold')]))
         story.append(t1)
 
-        # Payment breakdown
         story.append(Paragraph('Payment Breakdown', heading))
         t2 = Table([
             ['Method', 'Amount'],
@@ -1207,7 +1513,6 @@ def daily_summary_pdf(request):
         t2.setStyle(TableStyle(base_ts + [('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold')]))
         story.append(t2)
 
-        # Top products
         if top_products:
             story.append(Paragraph('Top Selling Products', heading))
             rows = [['#', 'Product', 'Units', 'Revenue']]
@@ -1217,7 +1522,6 @@ def daily_summary_pdf(request):
             t3.setStyle(TableStyle(base_ts))
             story.append(t3)
 
-        # Transactions
         if qs.exists():
             story.append(Paragraph('Transaction Details', heading))
             rows = [['Sale #', 'Time', 'Cashier', 'Customer', 'Payment', 'Total']]
@@ -1301,11 +1605,24 @@ def expenses_list(request):
 
         if action == 'add_expense':
             cat_id = request.POST.get('category')
+            try:
+                amount = Decimal(request.POST.get('amount', ''))
+                if amount <= 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                messages.error(request, 'Invalid expense amount.')
+                return redirect('expenses')
+
+            title = request.POST.get('title', '').strip()
+            if not title:
+                messages.error(request, 'Expense title is required.')
+                return redirect('expenses')
+
             exp = Expense.objects.create(
                 store=store,
                 category=get_object_or_404(ExpenseCategory, id=cat_id, store=store) if cat_id else None,
-                title=request.POST['title'],
-                amount=request.POST['amount'],
+                title=title,
+                amount=amount,
                 date=request.POST.get('date', date.today()),
                 notes=request.POST.get('notes', ''),
                 added_by=request.user,
@@ -1317,14 +1634,17 @@ def expenses_list(request):
             return redirect('expenses')
 
         elif action == 'add_category':
-            ExpenseCategory.objects.create(name=request.POST['cat_name'], store=store)
+            cat_name = request.POST.get('cat_name', '').strip()
+            if not cat_name:
+                messages.error(request, 'Category name is required.')
+                return redirect('expenses')
+            ExpenseCategory.objects.create(name=cat_name, store=store)
             messages.success(request, 'Category added.')
             return redirect('expenses')
 
         elif action == 'delete_expense':
-            exp_obj = store_queryset(Expense, request).filter(
-                id=request.POST['expense_id']
-            ).first()
+            exp_id = request.POST.get('expense_id')
+            exp_obj = store_queryset(Expense, request).filter(id=exp_id).first()
             if exp_obj:
                 audit(request, 'expense_delete',
                       f'Expense deleted: "{exp_obj.title}" — Rs {exp_obj.amount}')
@@ -1354,10 +1674,13 @@ def shift_view(request):
         action = request.POST.get('action')
 
         if action == 'open_shift' and not open_shift:
+            try:
+                opening_cash = Decimal(request.POST.get('opening_cash', 0))
+            except InvalidOperation:
+                opening_cash = Decimal('0')
             s = Shift.objects.create(
                 cashier=request.user, store=store,
-                opening_cash=request.POST.get('opening_cash', 0),
-                status='open',
+                opening_cash=opening_cash, status='open',
             )
             audit(request, 'shift_open',
                   f'Shift opened — Opening cash: Rs {s.opening_cash}')
@@ -1365,12 +1688,15 @@ def shift_view(request):
             return redirect('shift')
 
         elif action == 'close_shift' and open_shift:
-            closing_cash = Decimal(request.POST.get('closing_cash', 0))
-            shift_sales  = store_queryset(Sale, request).filter(
+            try:
+                closing_cash = Decimal(request.POST.get('closing_cash', 0))
+            except InvalidOperation:
+                closing_cash = Decimal('0')
+
+            shift_sales = store_queryset(Sale, request).filter(
                 cashier=request.user,
                 created_at__gte=open_shift.opened_at,
-                status='completed',
-                payment_method='cash',
+                status='completed', payment_method='cash',
             )
             expected   = open_shift.opening_cash + (
                 shift_sales.aggregate(t=Sum('total_amount'))['t'] or Decimal('0')
@@ -1453,7 +1779,7 @@ def barcode_labels(request):
     return render(request, 'pos/barcode_labels.html', {
         'products':          products,
         'selected_products': selected_products,
-        'copies':            int(request.GET.get('copies', 1)),
+        'copies':            max(1, min(int(request.GET.get('copies', 1)), 100)),
         'selected_ids':      selected_ids,
     })
 
@@ -1472,11 +1798,14 @@ def store_settings(request):
     )
 
     if request.method == 'POST':
-        store.name     = request.POST.get('store_name', store.name)
-        store.phone    = request.POST.get('phone', store.phone)
-        store.email    = request.POST.get('email', store.email)
-        store.address  = request.POST.get('address', store.address)
-        store.tax_rate = request.POST.get('tax_rate', store.tax_rate)
+        store.name    = request.POST.get('store_name', store.name).strip()
+        store.phone   = request.POST.get('phone', store.phone)
+        store.email   = request.POST.get('email', store.email)
+        store.address = request.POST.get('address', store.address)
+        try:
+            store.tax_rate = Decimal(request.POST.get('tax_rate', store.tax_rate))
+        except InvalidOperation:
+            pass
         store.save()
 
         settings_obj.receipt_header           = request.POST.get('receipt_header', '')
@@ -1485,8 +1814,15 @@ def store_settings(request):
         settings_obj.show_cashier_on_receipt  = 'show_cashier' in request.POST
         settings_obj.show_customer_on_receipt = 'show_customer' in request.POST
         settings_obj.currency_symbol          = request.POST.get('currency_symbol', 'Rs')
+
         if 'logo' in request.FILES:
-            settings_obj.logo = request.FILES['logo']
+            logo_file = request.FILES['logo']
+            err = _validate_image(logo_file)
+            if err:
+                messages.error(request, err)
+                return redirect('store_settings')
+            settings_obj.logo = logo_file
+
         settings_obj.save()
         audit(request, 'settings_change',
               f'Store settings updated by {request.user.username}')
@@ -1505,7 +1841,6 @@ def store_settings(request):
 @store_required
 @role_required('admin', 'manager')
 def user_list(request):
-    # Only show users belonging to this store
     users = User.objects.filter(
         profile__store=request.store
     ).select_related('profile')
@@ -1516,11 +1851,26 @@ def user_list(request):
 @role_required('admin', 'manager')
 def user_add(request):
     if request.method == 'POST':
-        username   = request.POST['username']
-        password   = request.POST['password']
+        username   = request.POST.get('username', '').strip()
+        password   = request.POST.get('password', '')
         first_name = request.POST.get('first_name', '')
         last_name  = request.POST.get('last_name', '')
         role       = request.POST.get('role', 'cashier')
+
+        # FIX SEC-PASSWD: Enforce minimum 8-char password for staff-created users too
+        if len(password) < 8:
+            messages.error(request, 'Password must be at least 8 characters.')
+            return render(request, 'pos/user_form.html', {'action': 'Add'})
+
+        # FIX SEC-RBAC: Managers cannot create admin accounts
+        if role not in ('cashier', 'manager', 'admin'):
+            role = 'cashier'
+        try:
+            if request.user.profile.role == 'manager' and role == 'admin':
+                messages.error(request, 'Managers cannot create admin accounts.')
+                return render(request, 'pos/user_form.html', {'action': 'Add'})
+        except Exception:
+            pass
 
         if User.objects.filter(username=username).exists():
             messages.error(request, 'Username already exists.')
@@ -1543,7 +1893,6 @@ def user_add(request):
 @store_required
 @role_required('admin')
 def store_list(request):
-    # Admins only see their own store; superadmin sees all (handled by store_queryset)
     stores = Store.objects.all() if request.user.is_superuser else Store.objects.filter(
         id=request.store.id
     )
@@ -1554,8 +1903,12 @@ def store_list(request):
 @role_required('admin')
 def store_add(request):
     if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        if not name:
+            messages.error(request, 'Store name is required.')
+            return redirect('store_add')
         Store.objects.create(
-            name=request.POST['name'],
+            name=name,
             address=request.POST.get('address', ''),
             phone=request.POST.get('phone', ''),
             email=request.POST.get('email', ''),
@@ -1587,14 +1940,22 @@ def manage_pins(request):
                 pin = request.POST.get('pin', '').strip()
                 if len(pin) != 4 or not pin.isdigit():
                     messages.error(request, 'PIN must be exactly 4 digits.')
-                elif UserProfile.objects.filter(pin=pin).exclude(user=target_user).exists():
-                    messages.error(request, 'PIN already used by another user.')
                 else:
-                    profile.pin = pin
-                    profile.save()
-                    messages.success(request, f'PIN set for {target_user.username}.')
+                    # FIX SEC-PIN: Check hash uniqueness, not plaintext
+                    # We must check all profiles to see if any other user has this pin
+                    pin_conflict = False
+                    for p in UserProfile.objects.exclude(user=target_user):
+                        if p.check_pin(pin):
+                            pin_conflict = True
+                            break
+                    if pin_conflict:
+                        messages.error(request, 'PIN already used by another user.')
+                    else:
+                        profile.set_pin(pin)
+                        profile.save()
+                        messages.success(request, f'PIN set for {target_user.username}.')
             elif action == 'clear_pin':
-                profile.pin = ''
+                profile.clear_pin()
                 profile.save()
                 messages.success(request, f'PIN cleared for {target_user.username}.')
         except User.DoesNotExist:
@@ -1618,14 +1979,14 @@ def reset_cashier(request):
             target_user = User.objects.get(id=user_id, profile__store=request.store)
             if action == 'reset_password':
                 new_password = request.POST.get('new_password', '').strip()
-                if len(new_password) < 4:
-                    messages.error(request, 'Password must be at least 4 characters.')
+                if len(new_password) < 8:
+                    messages.error(request, 'Password must be at least 8 characters.')
                 else:
                     target_user.set_password(new_password)
                     target_user.save()
                     messages.success(request, f'Password reset for {target_user.username}.')
             elif action == 'reset_pin':
-                target_user.profile.pin = ''
+                target_user.profile.clear_pin()
                 target_user.profile.save()
                 messages.success(request, f'PIN cleared for {target_user.username}.')
             elif action == 'toggle_active':
@@ -1690,23 +2051,42 @@ def tax_rules_view(request):
 
         if action == 'add':
             cat_id = request.POST.get('category')
+            name   = request.POST.get('name', '').strip()
+            if not name:
+                messages.error(request, 'Tax rule name is required.')
+                return redirect('tax_rules')
+            try:
+                rate = Decimal(request.POST.get('rate', ''))
+                if rate < 0 or rate > 100:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                messages.error(request, 'Rate must be between 0 and 100.')
+                return redirect('tax_rules')
+
+            tax_type = request.POST.get('tax_type', 'SALES_TAX')
+            tax_mode = request.POST.get('tax_mode', 'exclusive')
+            apply_to = request.POST.get('apply_to', 'all')
+
+            if tax_type not in dict(TaxRule.TAX_TYPE_CHOICES):
+                tax_type = 'SALES_TAX'
+            if tax_mode not in ('inclusive', 'exclusive'):
+                tax_mode = 'exclusive'
+            if apply_to not in ('all', 'category'):
+                apply_to = 'all'
+
             TaxRule.objects.create(
-                store=store,
-                name=request.POST['name'],
-                tax_type=request.POST['tax_type'],
-                rate=request.POST['rate'],
-                tax_mode=request.POST['tax_mode'],
-                apply_to=request.POST.get('apply_to', 'all'),
+                store=store, name=name, tax_type=tax_type, rate=rate,
+                tax_mode=tax_mode, apply_to=apply_to,
                 category=get_object_or_404(Category, id=cat_id) if cat_id else None,
                 is_active=True,
             )
             audit(request, 'settings_change',
-                  f'Tax rule added: {request.POST["name"]} @ {request.POST["rate"]}%')
+                  f'Tax rule added: {name} @ {rate}%')
             messages.success(request, 'Tax rule added.')
             return redirect('tax_rules')
 
         elif action == 'toggle':
-            rule          = get_object_or_404(TaxRule, id=request.POST['rule_id'], store=store)
+            rule = get_object_or_404(TaxRule, id=request.POST.get('rule_id'), store=store)
             rule.is_active = not rule.is_active
             rule.save()
             status = 'enabled' if rule.is_active else 'disabled'
@@ -1715,7 +2095,7 @@ def tax_rules_view(request):
             return redirect('tax_rules')
 
         elif action == 'delete':
-            rule = get_object_or_404(TaxRule, id=request.POST['rule_id'], store=store)
+            rule = get_object_or_404(TaxRule, id=request.POST.get('rule_id'), store=store)
             audit(request, 'settings_change', f'Tax rule deleted: {rule.name}')
             rule.delete()
             messages.success(request, 'Tax rule deleted.')
@@ -1748,6 +2128,8 @@ COMMON_CURRENCIES = [
     ('TRY', '₺',   'Turkish Lira'),
 ]
 
+_VALID_CURRENCY_CODES = {c[0] for c in COMMON_CURRENCIES}
+
 
 @store_required
 @role_required('admin', 'manager')
@@ -1757,30 +2139,46 @@ def currency_settings_view(request):
 
     if request.method == 'POST':
         symbol = request.POST.get('custom_symbol', '').strip() or request.POST.get('currency_symbol', 'Rs')
-        settings_obj.currency_code   = request.POST.get('currency_code', 'PKR')
+        code   = request.POST.get('currency_code', 'PKR').upper()
+        # Only allow known codes to prevent arbitrary data
+        if code not in _VALID_CURRENCY_CODES:
+            code = 'PKR'
+        try:
+            rate = Decimal(request.POST.get('exchange_rate', '1'))
+            if rate <= 0:
+                rate = Decimal('1')
+        except InvalidOperation:
+            rate = Decimal('1')
+
+        settings_obj.currency_code   = code
         settings_obj.currency_symbol = symbol
-        settings_obj.exchange_rate   = Decimal(request.POST.get('exchange_rate', '1'))
+        settings_obj.exchange_rate   = rate
         settings_obj.save()
         audit(request, 'settings_change',
-              f'Currency changed to {settings_obj.currency_code} ({symbol})')
+              f'Currency changed to {code} ({symbol})')
         messages.success(request, f'Currency updated to {symbol}.')
         return redirect('currency_settings')
 
     return render(request, 'pos/currency_settings.html', {
-        'settings':    settings_obj,
-        'currencies':  COMMON_CURRENCIES,
+        'settings':   settings_obj,
+        'currencies': COMMON_CURRENCIES,
     })
 
 
 @store_required
 @role_required('admin', 'manager')
 def fetch_live_rate(request):
-    target   = request.GET.get('target', 'USD').upper()
-    base     = request.GET.get('base', 'PKR').upper()
-    do_save  = request.GET.get('save', '0') == '1'
-    store    = request.store
+    # FIX SEC-SSRF: Validate currency codes are alpha-only before inserting in URL
+    target  = _re.sub(r'[^A-Z]', '', request.GET.get('target', 'USD').upper())[:3]
+    base    = _re.sub(r'[^A-Z]', '', request.GET.get('base', 'PKR').upper())[:3]
+    do_save = request.GET.get('save', '0') == '1'
+
+    if not target or not base:
+        return JsonResponse({'success': False, 'error': 'Invalid currency code'})
+
+    store        = request.store
     settings_obj, _ = StoreSettings.objects.get_or_create(store=store)
-    api_key  = settings_obj.exchange_rate_api_key.strip()
+    api_key      = settings_obj.exchange_rate_api_key.strip()
 
     try:
         import urllib.request as urlreq
@@ -1791,7 +2189,7 @@ def fetch_live_rate(request):
             url    = f'https://open.er-api.com/v6/latest/{base}'
             source = 'open.er-api.com (free)'
 
-        with urlreq.urlopen(url, timeout=8) as resp:
+        with urlreq.urlopen(url, timeout=8) as resp:  # noqa: S310
             data = json.loads(resp.read().decode())
 
         if data.get('result') != 'success':
@@ -1819,22 +2217,26 @@ def fetch_live_rate(request):
             'used_api_key': bool(api_key),
         })
     except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+        logger.error(f"fetch_live_rate error: {e}")
+        return JsonResponse({'success': False, 'error': 'Rate fetch failed'})
 
 
 @store_required
 @role_required('admin', 'manager')
+@require_POST
 def save_api_key(request):
-    if request.method == 'POST':
+    try:
         data = json.loads(request.body)
-        key  = data.get('api_key', '').strip()
-        s, _ = StoreSettings.objects.get_or_create(store=request.store)
-        s.exchange_rate_api_key = key
-        s.save()
-        audit(request, 'settings_change',
-              f'Exchange rate API key {"saved" if key else "removed"}')
-        return JsonResponse({'success': True})
-    return JsonResponse({'success': False, 'error': 'Invalid request'})
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'})
+
+    key  = data.get('api_key', '').strip()
+    s, _ = StoreSettings.objects.get_or_create(store=request.store)
+    s.exchange_rate_api_key = key
+    s.save()
+    audit(request, 'settings_change',
+          f'Exchange rate API key {"saved" if key else "removed"}')
+    return JsonResponse({'success': True})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1922,7 +2324,6 @@ def backup_database(request):
                 )
                 ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
 
-        # Sheet 1: Sales
         ws1 = wb.active; ws1.title = "Sales"
         style_sheet(ws1,
             ["Sale #","Date","Time","Cashier","Customer","Subtotal (Rs)","Discount (Rs)",
@@ -1938,7 +2339,6 @@ def backup_database(request):
              for s in store_queryset(Sale, request).order_by("-created_at")]
         )
 
-        # Sheet 2: Sale Items
         ws2 = wb.create_sheet("Sale Items")
         items_qs = SaleItem.objects.filter(
             sale__store=store
@@ -1951,7 +2351,6 @@ def backup_database(request):
              for i in items_qs]
         )
 
-        # Sheet 3: Products
         ws3 = wb.create_sheet("Products")
         style_sheet(ws3,
             ["Name","Barcode","Category","Selling Price (Rs)","Cost Price (Rs)",
@@ -1963,7 +2362,6 @@ def backup_database(request):
              for p in store_queryset(Product, request).filter(is_active=True)]
         )
 
-        # Sheet 4: Customers
         ws4 = wb.create_sheet("Customers")
         style_sheet(ws4,
             ["Name","Phone","Email","Address","Loyalty Points","Total Purchases","Total Spent (Rs)","Joined"],
@@ -1972,7 +2370,6 @@ def backup_database(request):
              for c in store_queryset(Customer, request)]
         )
 
-        # Sheet 5: Expenses
         ws5 = wb.create_sheet("Expenses")
         style_sheet(ws5,
             ["Date","Title","Category","Amount (Rs)","Added By","Notes"],
@@ -1982,7 +2379,6 @@ def backup_database(request):
              for e in store_queryset(Expense, request).order_by("-date")]
         )
 
-        # Sheet 6: Suppliers
         ws6 = wb.create_sheet("Suppliers")
         style_sheet(ws6,
             ["Name","Phone","Email","Address","Balance Owed (Rs)"],
@@ -1990,7 +2386,6 @@ def backup_database(request):
              for s in store_queryset(Supplier, request)]
         )
 
-        # Sheet 7: Summary
         ws7 = wb.create_sheet("Summary", 0); ws7.title = "Summary"
         ws7.column_dimensions["A"].width = 32
         ws7.column_dimensions["B"].width = 22
@@ -2003,13 +2398,13 @@ def backup_database(request):
         ws7["A2"] = f"Generated: {timezone.now().strftime('%d/%m/%Y %H:%M')}"
         ws7["A2"].font = Font(name="Arial", size=9, color="888888")
         for row_num, label, value in [
-            (4, "SALES & REVENUE", ""),
-            (5, "Total Completed Sales",
+            (4,  "SALES & REVENUE", ""),
+            (5,  "Total Completed Sales",
              store_queryset(Sale, request).filter(status="completed").count()),
-            (6, "Total Revenue (Rs)", float(total_revenue)),
-            (7, "Total Expenses (Rs)", float(total_expenses)),
-            (8, "Net Profit Estimate (Rs)", float(total_revenue) - float(total_expenses)),
-            (9, "Supplier Balance Owed (Rs)", float(total_supplier)),
+            (6,  "Total Revenue (Rs)", float(total_revenue)),
+            (7,  "Total Expenses (Rs)", float(total_expenses)),
+            (8,  "Net Profit Estimate (Rs)", float(total_revenue) - float(total_expenses)),
+            (9,  "Supplier Balance Owed (Rs)", float(total_supplier)),
             (11, "INVENTORY", ""),
             (12, "Total Active Products",
              store_queryset(Product, request).filter(is_active=True).count()),
@@ -2042,7 +2437,8 @@ def backup_database(request):
         return response
 
     except Exception as e:
-        messages.error(request, f'Backup error: {e}')
+        logger.error(f"backup_database error: {e}")
+        messages.error(request, 'Backup failed. Please try again.')
         return redirect('dashboard')
 
 
@@ -2054,9 +2450,24 @@ def restore_backup(request):
     store   = request.store
 
     if request.method == 'POST' and request.FILES.get('backup_file'):
+        backup_file = request.FILES['backup_file']
+
+        # FIX SEC-UPLOAD: Validate backup file type and size
+        if backup_file.size > 20 * 1024 * 1024:  # 20 MB limit
+            messages.error(request, 'Backup file too large (max 20 MB).')
+            return redirect('restore_backup')
+
+        allowed_xlsx_types = {
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel',
+        }
+        if backup_file.content_type not in allowed_xlsx_types:
+            messages.error(request, 'Only Excel (.xlsx) backup files are accepted.')
+            return redirect('restore_backup')
+
         import openpyxl
         try:
-            wb = openpyxl.load_workbook(request.FILES['backup_file'])
+            wb = openpyxl.load_workbook(backup_file)
 
             if 'Products' in wb.sheetnames:
                 count = 0
@@ -2136,7 +2547,8 @@ def restore_backup(request):
                 messages.warning(request, f'{len(errors)} rows had errors (skipped).')
 
         except Exception as e:
-            messages.error(request, f'Restore failed: {e}')
+            logger.error(f"restore_backup error: {e}")
+            messages.error(request, 'Restore failed. File may be corrupted.')
         return redirect('restore_backup')
 
     return render(request, 'pos/restore_backup.html', {
@@ -2276,15 +2688,21 @@ def purchase_invoice_pdf(request, purchase_id):
 
 @store_required
 def send_whatsapp(request, sale_id):
-    sale  = get_object_or_404(Sale, id=sale_id, store=request.store)
+    if request.user.is_superuser:
+        sale = get_object_or_404(Sale, id=sale_id)
+    else:
+        sale = get_object_or_404(Sale, id=sale_id, store=request.store)
     phone = request.POST.get('phone', '').strip() if request.method == 'POST' else ''
     if not phone:
         phone = sale.customer.phone if sale.customer else ''
     if not phone:
         return JsonResponse({'success': False, 'message': 'No phone number provided.'})
 
-    import re
-    phone = re.sub(r'[\s\-\(\)\+]', '', phone)
+    # FIX SEC-PHONE: Strict numeric-only phone validation
+    phone = _re.sub(r'[\s\-\(\)\+]', '', phone)
+    if not _re.match(r'^\d{7,15}$', phone):
+        return JsonResponse({'success': False, 'message': 'Invalid phone number.'})
+
     if phone.startswith('0'):
         phone = '92' + phone[1:]
     elif not phone.startswith('92') and len(phone) == 10:
@@ -2365,7 +2783,8 @@ def cloud_backup_settings(request):
                 return JsonResponse({'ok': True,
                                      'email': about.get('user', {}).get('emailAddress', 'unknown')})
             except Exception as exc:
-                return JsonResponse({'ok': False, 'error': str(exc)})
+                logger.error(f"GDrive test error: {exc}")
+                return JsonResponse({'ok': False, 'error': 'Connection test failed.'})
 
         elif action == 'manual_backup':
             if not settings_obj.gdrive_credentials_json:
@@ -2394,7 +2813,7 @@ def cloud_backup_settings(request):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# GOOGLE DRIVE HELPERS  (unchanged — internal only)
+# GOOGLE DRIVE HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _get_drive_service(credentials_json_str: str):
@@ -2498,9 +2917,8 @@ def _gdrive_upload_excel_async(settings_obj_id: int, label: str):
         settings_obj.gdrive_last_backup_url = uploaded.get('webViewLink', '')
         settings_obj.gdrive_last_backup_at  = timezone.now()
         settings_obj.save(update_fields=['gdrive_last_backup_url', 'gdrive_last_backup_at'])
-        print(f'[GDrive] backup uploaded: {filename}')
     except Exception as exc:
-        print(f'[GDrive] async backup error: {exc}')
+        logger.error(f'[GDrive] async backup error: {exc}')
 
 
 def _trigger_gdrive_auto_backup(store, trigger_label: str, check_field: str):
@@ -2521,4 +2939,4 @@ def _trigger_gdrive_auto_backup(store, trigger_label: str, check_field: str):
             daemon=True,
         ).start()
     except Exception as exc:
-        print(f'[GDrive] trigger error: {exc}')
+        logger.error(f'[GDrive] trigger error: {exc}')

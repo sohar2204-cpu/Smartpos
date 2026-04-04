@@ -211,6 +211,7 @@ body.lang-ur .search-result-price{margin-left:0;margin-right:12px;}
 {% endblock %}
 
 {% block extra_js %}
+{% csrf_token %}
 <script>
 let cart = [];
 const CURRENCY = '{{ currency_symbol|default:"Rs" }}';
@@ -627,8 +628,12 @@ function newSale() {
 }
 
 function getCookie(name) {
+  // Try reading from cookie (requires CSRF_COOKIE_HTTPONLY = False in settings)
   const v = document.cookie.match('(^|;) ?'+name+'=([^;]*)(;|$)');
-  return v ? v[2] : null;
+  if (v) return decodeURIComponent(v[2]);
+  // Fallback: read from hidden input injected by {% csrf_token %}
+  const el = document.querySelector('[name=csrfmiddlewaretoken]');
+  return el ? el.value : '';
 }
 </script>
 {% endblock %}

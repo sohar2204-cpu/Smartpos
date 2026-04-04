@@ -34,7 +34,7 @@ class StoreScopeMiddleware:
         return self.get_response(request)
 
     def _attach_store(self, request):
-        # Superusers float above all stores
+        # Superusers float above all stores — store is resolved per-view as needed
         if request.user.is_superuser:
             request.store = None
             return

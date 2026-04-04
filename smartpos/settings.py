@@ -1,24 +1,37 @@
 import os
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
-# ── Security ──────────────────────────────────────────────────────────────────
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-change-this-in-production-smartpos-2024'
-)
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
+# ── Security ───────────────────────────────────────────────────────────────────
+# FIX SEC-01: No hardcoded fallback secret key. App will refuse to start without one.
+_secret = os.environ.get('SECRET_KEY', '')
+if not _secret:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(50))\""
+    )
+SECRET_KEY = _secret
 
-# ── Site URL (used in emails) ─────────────────────────────────────────────────
-# On Railway this will be set as an env variable like:
-#   SITE_URL=https://smartpos-production.up.railway.app
+# FIX SEC-02: DEBUG must be explicitly set to 'True' — defaults to False (safe).
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+
+# FIX SEC-03: No wildcard ALLOWED_HOSTS. Must be explicitly configured.
+_hosts = os.environ.get('ALLOWED_HOSTS', '')
+if not _hosts and not DEBUG:
+    raise RuntimeError(
+        "ALLOWED_HOSTS environment variable must be set in production. "
+        "Example: ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com"
+    )
+ALLOWED_HOSTS = [h.strip() for h in _hosts.split(',') if h.strip()] if _hosts else ['localhost', '127.0.0.1']
+
+# ── Site URL ───────────────────────────────────────────────────────────────────
 SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000')
 
-# ── Installed apps ────────────────────────────────────────────────────────────
+# ── Installed apps ─────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -62,10 +75,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'smartpos.wsgi.application'
 
-# ── Database ──────────────────────────────────────────────────────────────────
-# Railway automatically sets DATABASE_URL when you add a PostgreSQL plugin.
-# Locally it falls back to SQLite.
-
+# ── Database ───────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
@@ -92,21 +102,22 @@ else:
         }
     }
 
-# ── Password validation ───────────────────────────────────────────────────────
+# ── Password validation ────────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+     'OPTIONS': {'min_length': 10}},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# ── Internationalisation ──────────────────────────────────────────────────────
+# ── Internationalisation ───────────────────────────────────────────────────────
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE     = 'Asia/Karachi'   # change to your timezone
+TIME_ZONE     = os.environ.get('TIME_ZONE', 'Asia/Karachi')
 USE_I18N      = True
 USE_TZ        = True
 
-# ── Static & Media ────────────────────────────────────────────────────────────
+# ── Static & Media ─────────────────────────────────────────────────────────────
 STATIC_URL    = '/static/'
 STATIC_ROOT   = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
@@ -117,29 +128,34 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# ── Auth redirects ────────────────────────────────────────────────────────────
+# ── Auth redirects ─────────────────────────────────────────────────────────────
 LOGIN_URL          = '/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL= '/login/'
 
 LOW_STOCK_THRESHOLD = 10
 
-# ── Email ─────────────────────────────────────────────────────────────────────
-# For Railway, set these environment variables in your Railway dashboard:
-#   EMAIL_HOST         smtp.gmail.com
-#   EMAIL_PORT         587
-#   EMAIL_HOST_USER    yourapp@gmail.com
-#   EMAIL_HOST_PASSWORD  your-gmail-app-password
-#   DEFAULT_FROM_EMAIL SmartPOS <yourapp@gmail.com>
-#
-# To get a Gmail App Password:
-#   1. Go to myaccount.google.com → Security → 2-Step Verification → App passwords
-#   2. Create an app password for "Mail"
-#   3. Use that 16-character password as EMAIL_HOST_PASSWORD
+# ── Session Security ───────────────────────────────────────────────────────────
+# FIX SEC-09: Session hardening
+SESSION_COOKIE_HTTPONLY        = True          # JS cannot read session cookie
+SESSION_COOKIE_SAMESITE        = 'Lax'         # CSRF protection for cookies
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True          # Session dies when browser closes
+SESSION_COOKIE_AGE             = 8 * 60 * 60   # 8-hour absolute max
 
+# CSRF cookie — HttpOnly MUST be False so JavaScript can read the csrftoken
+# cookie and send it in the X-CSRFToken header for AJAX requests (fetch/XHR).
+# Setting it True breaks all JSON POST endpoints (checkout, etc.) with 403.
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+# FIX SEC-10: Login rate limiting (requires django-axes or handled in view)
+# Max failed login attempts tracked via AXES (add to INSTALLED_APPS if using django-axes)
+# LOGIN_ATTEMPTS_LIMIT = 5
+
+# ── Email ──────────────────────────────────────────────────────────────────────
 EMAIL_BACKEND       = os.environ.get(
     'EMAIL_BACKEND',
-    'django.core.mail.backends.console.EmailBackend'  # prints to console locally
+    'django.core.mail.backends.console.EmailBackend'
 )
 EMAIL_HOST          = os.environ.get('EMAIL_HOST',          'smtp.gmail.com')
 EMAIL_PORT          = int(os.environ.get('EMAIL_PORT',      '587'))
@@ -151,10 +167,72 @@ DEFAULT_FROM_EMAIL  = os.environ.get(
     f'SmartPOS <{EMAIL_HOST_USER}>'
 )
 
-# ── Production security (auto-enabled when DEBUG=False) ───────────────────────
+# ── File Upload Security ───────────────────────────────────────────────────────
+# FIX SEC-11: Limit upload sizes
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024   # 5 MB max POST body
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024   # 5 MB max file upload
+
+# ── Production Security ────────────────────────────────────────────────────────
+# FIX SEC-04/05/06/07/08: Comprehensive security headers
 if not DEBUG:
-    SECURE_PROXY_SSL_HEADER  = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SESSION_COOKIE_SECURE    = True
-    CSRF_COOKIE_SECURE       = True
-    SECURE_BROWSER_XSS_FILTER = True
-    X_FRAME_OPTIONS          = 'DENY'
+    SECURE_PROXY_SSL_HEADER         = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE           = True
+    CSRF_COOKIE_SECURE              = True
+    SECURE_BROWSER_XSS_FILTER       = True
+    X_FRAME_OPTIONS                 = 'DENY'
+    SECURE_CONTENT_TYPE_NOSNIFF     = True           # FIX: Prevent MIME sniffing
+    SECURE_HSTS_SECONDS             = 31536000        # FIX: 1 year HSTS
+    SECURE_HSTS_INCLUDE_SUBDOMAINS  = True
+    SECURE_HSTS_PRELOAD             = True
+    SECURE_REFERRER_POLICY          = 'strict-origin-when-cross-origin'
+else:
+    # Dev-only: still set frame options and nosniff
+    X_FRAME_OPTIONS             = 'SAMEORIGIN'
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# ── Logging ────────────────────────────────────────────────────────────────────
+# FIX SEC-13: Structured security logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{asctime}] {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'security_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': BASE_DIR / 'logs' / 'security.log',
+            'maxBytes': 10 * 1024 * 1024,   # 10 MB
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django.security': {
+            'handlers': ['console', 'security_file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'pos.security': {
+            'handlers': ['console', 'security_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+        },
+    },
+}
+
+# Ensure log directory exists
+import os as _os
+_log_dir = BASE_DIR / 'logs'
+_log_dir.mkdir(exist_ok=True)

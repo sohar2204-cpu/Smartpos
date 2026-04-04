@@ -13,7 +13,7 @@ def store_required(view_func):
     @login_required
     def wrapper(request, *args, **kwargs):
         if request.user.is_superuser:
-            # Superadmin can access everything
+            # Superadmin can access everything — store context resolved per-view
             return view_func(request, *args, **kwargs)
 
         if not request.store:

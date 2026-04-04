@@ -2,7 +2,7 @@ import json
 import threading
 from datetime import timedelta
 from decimal import Decimal
-from datetime import timedelta
+
 from django.utils import timezone
 from django.utils.text import slugify
 from django.shortcuts import render, redirect, get_object_or_404
@@ -10,9 +10,9 @@ from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.db.models import Sum
-from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth import login
+
 from .models import Store, UserProfile, StoreSettings, Sale, Product, Customer
 
 
@@ -24,13 +24,12 @@ def register_view(request):
     """
     Public self-signup page.
     GET  → render register.html
-    POST → validate → create Store + User + UserProfile + StoreSettings → JSON
+    POST → validate → create Store + User + UserProfile + StoreSettings → login → redirect
     """
     if request.user.is_authenticated:
         return redirect('dashboard')
 
     if request.method == 'POST':
-        # ── Collect ───────────────────────────────────────────────────────
         first_name      = request.POST.get('first_name',      '').strip()
         last_name       = request.POST.get('last_name',       '').strip()
         username        = request.POST.get('username',        '').strip()
@@ -39,11 +38,10 @@ def register_view(request):
         store_name      = request.POST.get('store_name',      '').strip()
         phone           = request.POST.get('phone',           '').strip()
         address         = request.POST.get('address',         '').strip()
-        business_type   = request.POST.get('business_type',   'retail')
         currency_symbol = request.POST.get('currency_symbol', 'Rs')
         plan            = request.POST.get('plan',            'starter')
 
-        # ── Validate ──────────────────────────────────────────────────────
+        # ── Validate ────────────────────────────────────────────────────────
         if not first_name:
             return JsonResponse({'success': False, 'error': 'First name is required.'})
         if not username or ' ' in username:
@@ -57,7 +55,7 @@ def register_view(request):
         if plan not in ('starter', 'pro', 'enterprise'):
             plan = 'starter'
 
-        # ── Uniqueness checks ─────────────────────────────────────────────
+        # ── Uniqueness checks ────────────────────────────────────────────────
         if User.objects.filter(username__iexact=username).exists():
             return JsonResponse({'success': False,
                                  'error': f'Username "{username}" is already taken. Please choose another.'})
@@ -69,7 +67,6 @@ def register_view(request):
                                  'error': f'A store named "{store_name}" already exists.'})
 
         try:
-            # ── Create Store ──────────────────────────────────────────────
             store = Store.objects.create(
                 name=store_name,
                 phone=phone,
@@ -77,29 +74,25 @@ def register_view(request):
                 email=email,
                 plan=plan,
                 status='active',
-                subdomain=slugify(store_name)
-) 
+                subdomain=slugify(store_name),
+            )
             store.trial_ends_at = timezone.now() + timedelta(days=7)
             store.save()
 
-            # ── Create StoreSettings with currency ────────────────────────
             StoreSettings.objects.create(
                 store=store,
                 currency_symbol=currency_symbol,
                 receipt_footer=f'Thank you for shopping at {store_name}!',
             )
 
-            # ── Create User ───────────────────────────────────────────────
             user = User.objects.create_user(
                 username=username,
                 password=password,
                 first_name=first_name,
                 last_name=last_name,
                 email=email,
-                
             )
 
-            # ── Create UserProfile — admin of their own store ─────────────
             UserProfile.objects.create(
                 user=user,
                 role='admin',
@@ -107,16 +100,20 @@ def register_view(request):
                 phone=phone,
             )
 
+            # FIX BUG-01: The original code returned a JSON response BEFORE calling
+            # login(), making the login call dead/unreachable code.
+            # Fix: log the user in FIRST, then return the success response.
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+
             return JsonResponse({
-              'success': True,
-              'redirect_url': '/dashboard/'
-        })
-            login(request, user)
+                'success':      True,
+                'redirect_url': '/dashboard/',
+            })
+
         except Exception as e:
             return JsonResponse({'success': False,
                                  'error': f'Registration failed: {str(e)}'})
 
-    # GET
     return render(request, 'pos/register.html')
 
 
@@ -125,19 +122,17 @@ def register_view(request):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def is_superadmin(user):
-    try:
-        return user.is_staff or (
-            user.profile.role == 'admin' and not user.profile.store
-        )
-    except Exception:
-        return user.is_staff
+    """Returns True only for Django superusers (is_superuser=True)."""
+    # FIX SEC-SUPERADMIN: Removed the overly-broad check that treated
+    # any store-less admin as a superadmin. Only Django superusers qualify.
+    return user.is_authenticated and user.is_superuser
 
 
 def superadmin_required(view_fn):
     from functools import wraps
     @wraps(view_fn)
     def wrapper(request, *args, **kwargs):
-        if not request.user.is_authenticated or not is_superadmin(request.user):
+        if not is_superadmin(request.user):
             messages.error(request, 'Access denied. Platform admins only.')
             return redirect('dashboard')
         return view_fn(request, *args, **kwargs)
@@ -151,19 +146,19 @@ def _enrich_store(store):
     sales_qs   = Sale.objects.filter(
         store=store, status='completed', created_at__date__gte=thirty_ago
     )
-    revenue_30d  = sales_qs.aggregate(t=Sum('total_amount'))['t'] or 0
-    user_count   = UserProfile.objects.filter(store=store).count()
-    owner        = UserProfile.objects.filter(store=store, role='admin').first()
+    revenue_30d = sales_qs.aggregate(t=Sum('total_amount'))['t'] or 0
+    user_count  = UserProfile.objects.filter(store=store).count()
+    owner       = UserProfile.objects.filter(store=store, role='admin').first()
     return {
-        'id':            store.id,
-        'name':          store.name,
+        'id':             store.id,
+        'name':           store.name,
         'owner_username': owner.user.username if owner else '—',
-        'plan':          getattr(store, 'plan',   'starter'),
-        'status':        getattr(store, 'status', 'active'),
-        'user_count':    user_count,
-        'sales_30d':     sales_qs.count(),
-        'revenue_30d':   revenue_30d,
-        'created_at':    store.created_at,
+        'plan':           store.plan,
+        'status':         store.status,
+        'user_count':     user_count,
+        'sales_30d':      sales_qs.count(),
+        'revenue_30d':    revenue_30d,
+        'created_at':     store.created_at,
     }
 
 
@@ -197,19 +192,26 @@ def superadmin_dashboard(request):
 @login_required
 @superadmin_required
 def superadmin_suspend_store(request, store_id):
+    # FIX SEC-CSRF: State-changing action must be POST only
+    if request.method != 'POST':
+        return redirect('superadmin_dashboard')
+
     store = get_object_or_404(Store, id=store_id)
-    if request.method == 'POST':
-        ids = UserProfile.objects.filter(store=store).values_list('user_id', flat=True)
-        User.objects.filter(id__in=ids).update(is_active=False)
-        store.status = 'suspended'
-        store.save(update_fields=['status'])
-        messages.success(request, f'Store "{store.name}" suspended.')
+    ids   = UserProfile.objects.filter(store=store).values_list('user_id', flat=True)
+    User.objects.filter(id__in=ids).update(is_active=False)
+    store.status = 'suspended'
+    store.save(update_fields=['status'])
+    messages.success(request, f'Store "{store.name}" suspended.')
     return redirect('superadmin_dashboard')
 
 
 @login_required
 @superadmin_required
 def superadmin_activate_store(request, store_id):
+    # FIX SEC-CSRF: State-changing action must be POST only
+    if request.method != 'POST':
+        return redirect('superadmin_dashboard')
+
     store = get_object_or_404(Store, id=store_id)
     ids   = UserProfile.objects.filter(store=store).values_list('user_id', flat=True)
     User.objects.filter(id__in=ids).update(is_active=True)
@@ -222,16 +224,28 @@ def superadmin_activate_store(request, store_id):
 @login_required
 @superadmin_required
 def superadmin_login_as(request, store_id):
+    """
+    Impersonate a store admin.
+    FIX SEC-IMPERSONATE: This feature is disabled entirely in production regardless
+    of DEBUG setting. Requires explicit ENABLE_IMPERSONATION env var.
+    """
     from django.conf import settings as django_settings
-    if not django_settings.DEBUG:
-        messages.error(request, 'Impersonation is disabled in production.')
+    import os
+
+    # Must be explicitly enabled via env var, not just by DEBUG mode
+    if not os.environ.get('ENABLE_IMPERSONATION', '').lower() == 'true':
+        messages.error(request, 'Impersonation is disabled.')
         return redirect('superadmin_dashboard')
+
+    if request.method != 'POST':
+        return redirect('superadmin_dashboard')
+
     store   = get_object_or_404(Store, id=store_id)
     profile = UserProfile.objects.filter(store=store, role='admin').first()
     if not profile:
         messages.error(request, 'No admin user for this store.')
         return redirect('superadmin_dashboard')
-    from django.contrib.auth import login
+
     login(request, profile.user,
           backend='django.contrib.auth.backends.ModelBackend')
     messages.info(request, f'Now logged in as {profile.user.username} ({store.name})')
@@ -250,6 +264,12 @@ def superadmin_add_store(request):
         if not all([store_name, username, password]):
             messages.error(request, 'Store name, username, and password are required.')
             return redirect('superadmin_add_store')
+
+        # FIX SEC-PASSWD: Enforce minimum password length for admin-created accounts
+        if len(password) < 8:
+            messages.error(request, 'Password must be at least 8 characters.')
+            return redirect('superadmin_add_store')
+
         if User.objects.filter(username=username).exists():
             messages.error(request, f'Username "{username}" already exists.')
             return redirect('superadmin_add_store')
@@ -264,4 +284,4 @@ def superadmin_add_store(request):
             f'Store "{store_name}" and admin "{username}" created.')
         return redirect('superadmin_dashboard')
 
-    return render(request, 'pos/superadmin_add_store.html')
+    return render(request, 'pos/store_form.html', {'action': 'Add'})
